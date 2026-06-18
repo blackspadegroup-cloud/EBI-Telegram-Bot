@@ -2,11 +2,7 @@
 python-telegram-bot>=21.0,<22.0
 
 # AI (Google Gemini - free tier)
-<<<<<<< HEAD
 google-genai
-=======
-google-generativeai>=0.8.0,<1.0
->>>>>>> 0cd70302babe8b2f505af8edea7dc7fb5fa5cb98
 
 # Database
 supabase>=2.11.0,<3.0
