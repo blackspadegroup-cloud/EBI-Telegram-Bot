@@ -81,7 +81,7 @@ def _fetch_btc() -> dict:
     hist = ticker.history(period="2d")
 
     price = round(info.last_price, 2) if hasattr(info, "last_price") else 0.0
-    market_cap = getattr(info, "market_cap", 0)
+    market_cap = getattr(info, "market_cap", None) or 0
 
     if len(hist) >= 2:
         prev_close = hist["Close"].iloc[-2]

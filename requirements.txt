@@ -2,7 +2,7 @@
 python-telegram-bot==20.7
 
 # AI (Google Gemini - free tier)
-google-generativeai
+google-genai
 
 # Database (no version pin — lets pip resolve httpx conflict)
 supabase

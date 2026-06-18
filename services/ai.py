@@ -1,10 +1,10 @@
 """
 services/ai.py – Google Gemini AI service.
 
-Free tier limits (as of 2024):
+Free tier limits:
   - 15 requests per minute
   - 1,000,000 tokens per day
-  - Model: gemini-1.5-flash
+  - Model: gemini-2.0-flash
 
 Sign up at: https://aistudio.google.com/app/apikey
 """
@@ -12,16 +12,15 @@ Sign up at: https://aistudio.google.com/app/apikey
 import asyncio
 from typing import Optional
 
-import google.generativeai as genai
+from google import genai
 
 from config import config
 from utils.logger import get_logger
 
 log = get_logger("ai_service")
 
-# Configure Gemini once at import
-genai.configure(api_key=config.GEMINI_API_KEY)
-_model = genai.GenerativeModel(config.GEMINI_MODEL)
+# Initialise Gemini client once at import
+_client = genai.Client(api_key=config.GEMINI_API_KEY)
 
 
 async def generate_market_update(gold_data: dict, btc_data: dict) -> Optional[str]:
@@ -179,11 +178,13 @@ async def _call_gemini(prompt: str, retries: int = 2) -> Optional[str]:
     """Call Gemini API with retry logic. Runs in a thread to keep async."""
     for attempt in range(retries + 1):
         try:
-            # Gemini SDK is sync; run in thread pool to avoid blocking event loop
             loop = asyncio.get_event_loop()
             response = await loop.run_in_executor(
                 None,
-                lambda: _model.generate_content(prompt)
+                lambda: _client.models.generate_content(
+                    model=config.GEMINI_MODEL,
+                    contents=prompt,
+                )
             )
             return response.text.strip()
         except Exception as e:
