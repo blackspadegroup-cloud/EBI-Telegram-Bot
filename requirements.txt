@@ -1,22 +1,27 @@
 # Telegram
-python-telegram-bot==20.7
+python-telegram-bot>=21.0,<22.0
 
 # AI (Google Gemini - free tier)
+<<<<<<< HEAD
 google-genai
+=======
+google-generativeai>=0.8.0,<1.0
+>>>>>>> 0cd70302babe8b2f505af8edea7dc7fb5fa5cb98
 
-# Database (no version pin — lets pip resolve httpx conflict)
-supabase
+# Database
+supabase>=2.11.0,<3.0
 
 # Scheduling
-APScheduler
+APScheduler>=3.10.4,<4.0
 
 # HTTP
-aiohttp
-feedparser
+aiohttp>=3.10.0,<4.0
+feedparser>=6.0.11,<7.0
 
 # Finance data (free, no API key needed)
-yfinance
+yfinance>=0.2.37,<1.0
 
 # Utilities
-python-dotenv
-pytz
+python-dotenv>=1.0.0,<2.0
+pytz>=2024.1
+# hashlib is built into Python — no install needed
