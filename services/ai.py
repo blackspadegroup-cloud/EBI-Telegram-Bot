@@ -118,6 +118,34 @@ Respond in the same language the member used. If mixed, respond in English."""
     return await _call_groq(prompt)
 
 
+async def generate_mindset_content() -> Optional[str]:
+    """
+    Generate weekend trading mindset content — bilingual (EN + CN).
+    Topics rotate naturally via AI temperature variation.
+    """
+    prompt = """You are a professional trading coach for Elite by Infinity, a trading education community focused on Gold and Bitcoin.
+
+Write an inspiring and practical weekend trading mindset post for retail traders. Each time, pick a DIFFERENT real challenge traders face — examples: overtrading, FOMO entries, revenge trading, cutting winners too early, ignoring your own rules, emotional revenge after a stop-out, sizing too big after a win streak.
+
+FORMAT YOUR RESPONSE EXACTLY LIKE THIS:
+
+💭 *Weekend Trading Mindset*
+
+[Write 3–4 sentences in English. Be specific, honest, and actionable — not generic motivation. Name the real mistake, explain why traders do it, and give one concrete fix.]
+
+💭 *周末交易心态*
+
+[Exact same content in Simplified Chinese, 3–4 sentences. Match the tone and specifics.]
+
+RULES:
+- Never guarantee profits or give specific trade advice
+- Be direct and honest — real traders respect bluntness over fluff
+- Reference real scenarios (e.g. "after two losing trades in a row", "when price rockets past your entry")
+- Keep the English and Chinese versions consistent in meaning
+- Do NOT add any other text, labels, or disclaimers outside the format above"""
+    return await _call_groq(prompt)
+
+
 async def generate_economic_event_alert(event: dict) -> Optional[str]:
     """Generate a pre-event alert for a high-impact economic release."""
     prompt = f"""Write a short bilingual alert for a trading community about an upcoming high-impact economic event.
