@@ -21,7 +21,7 @@ class Config:
 
     # ── AI ────────────────────────────────────────────────────
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
-    GEMINI_MODEL: str = "gemini-2.0-flash"  # Free tier model
+    GEMINI_MODEL: str = "gemini-1.5-flash"  # Free tier model
 
     # ── Database ──────────────────────────────────────────────
     SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
