@@ -117,9 +117,9 @@ async def post_for_approval(bot: Bot, content_type: str = "market") -> None:
             header = format_price_header(gold_data, btc_data)
 
             ai_results = await asyncio.gather(
-                generate_market_update(gold_data, btc_data),
-                generate_market_update(gold_data, btc_data),
-                generate_market_update(gold_data, btc_data),
+                generate_market_update(gold_data, btc_data, perspective="technical"),
+                generate_market_update(gold_data, btc_data, perspective="fundamental"),
+                generate_market_update(gold_data, btc_data, perspective="sentiment"),
             )
             for result in ai_results:
                 if result:
@@ -128,9 +128,9 @@ async def post_for_approval(bot: Bot, content_type: str = "market") -> None:
 
         else:  # mindset
             ai_results = await asyncio.gather(
-                generate_mindset_content(),
-                generate_mindset_content(),
-                generate_mindset_content(),
+                generate_mindset_content(topic="discipline"),
+                generate_mindset_content(topic="risk"),
+                generate_mindset_content(topic="psychology"),
             )
             for result in ai_results:
                 if result:
@@ -157,17 +157,24 @@ async def post_for_approval(bot: Bot, content_type: str = "market") -> None:
             parse_mode=ParseMode.MARKDOWN,
         )
 
+        # ── Version labels per content type ───────────────────────────────
+        if content_type == "market":
+            version_labels = ["Version 1 — Technical 📊", "Version 2 — Fundamental 📰", "Version 3 — Sentiment 🧠"]
+        else:
+            version_labels = ["Version 1 — Discipline 🎯", "Version 2 — Risk Mgmt 🛡️", "Version 3 — Psychology 🧘"]
+
         # ── Send each version with its own button ──────────────────────────
         for i, version in enumerate(versions, 1):
+            label = version_labels[i - 1] if i <= len(version_labels) else f"Version {i}"
             keyboard = InlineKeyboardMarkup([[
                 InlineKeyboardButton(
-                    f"✅ Send Version {i}",
+                    f"✅ Send {label}",
                     callback_data=f"approve:{uid}:{i}",
                 )
             ]])
             await bot.send_message(
                 chat_id=config.APPROVAL_GROUP_ID,
-                text=f"*━━ Version {i} ━━*\n\n{version}",
+                text=f"*━━ {label} ━━*\n\n{version}",
                 parse_mode=ParseMode.MARKDOWN,
                 reply_markup=keyboard,
             )

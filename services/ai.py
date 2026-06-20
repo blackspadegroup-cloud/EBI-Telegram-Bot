@@ -23,13 +23,52 @@ log = get_logger("ai_service")
 _client = Groq(api_key=config.GROQ_API_KEY)
 
 
-async def generate_market_update(gold_data: dict, btc_data: dict) -> Optional[str]:
+async def generate_market_update(
+    gold_data: dict,
+    btc_data: dict,
+    perspective: str = "balanced",
+) -> Optional[str]:
     """
     Generate a bilingual market update (English + Chinese) for Gold and Bitcoin.
-    Returns a formatted Telegram message string, or None on failure.
+    perspective: "technical" | "fundamental" | "sentiment"
+    Each perspective produces distinctly different content.
     """
-    prompt = f"""You are a professional market analyst for a trading community.
-Write a concise market update based on the data below.
+
+    perspective_instructions = {
+        "technical": (
+            "PERSPECTIVE: Technical Analysis\n"
+            "Focus ONLY on price action and chart behaviour:\n"
+            "- Where price is relative to recent highs/lows\n"
+            "- Whether momentum is accelerating or stalling\n"
+            "- Key price levels traders are watching (support/resistance)\n"
+            "- Short-term trend direction based on the move\n"
+            "Do NOT discuss news or macro. Pure price-action lens."
+        ),
+        "fundamental": (
+            "PERSPECTIVE: Fundamental & News-Driven\n"
+            "Focus ONLY on the news headlines and macro drivers provided:\n"
+            "- What specific news or event is moving the market\n"
+            "- The macro backdrop (USD, inflation, Fed, risk appetite)\n"
+            "- Why this fundamental factor matters for Gold or BTC right now\n"
+            "Reference the actual headlines given. No generic commentary."
+        ),
+        "sentiment": (
+            "PERSPECTIVE: Market Sentiment & Trader Psychology\n"
+            "Focus ONLY on what traders and the crowd are doing:\n"
+            "- Is the market fearful or greedy right now?\n"
+            "- Are traders chasing, fading, or sitting on the sidelines?\n"
+            "- What traps or opportunities does the current sentiment create?\n"
+            "- What should a disciplined trader watch for emotionally?\n"
+            "Make it feel like a senior trader talking to his team."
+        ),
+    }
+
+    angle = perspective_instructions.get(perspective, perspective_instructions["fundamental"])
+
+    prompt = f"""You are a professional market analyst for Elite by Infinity, a trading community.
+Write a market update using the SPECIFIC PERSPECTIVE below. This is one of 3 different versions — make it clearly distinct in angle and insight.
+
+{angle}
 
 GOLD (XAUUSD) DATA:
 - Current Price: ${gold_data.get('price', 'N/A')}
@@ -42,32 +81,31 @@ BITCOIN (BTC) DATA:
 - Market Cap: ${btc_data.get('market_cap', 'N/A')}
 - Recent News Headlines: {btc_data.get('news_headlines', 'No recent news')}
 
-FORMAT YOUR RESPONSE EXACTLY LIKE THIS (use these exact emoji and labels):
+FORMAT YOUR RESPONSE EXACTLY LIKE THIS:
 
 🥇 *Gold Update*
-[3 sentences max in English covering: macro factors, key driver, sentiment bias]
+[3 sentences in English — strictly from the assigned perspective]
 Bias: [Bullish 📈 / Bearish 📉 / Neutral ➡️]
 
 🥇 *黄金更新*
-[Same content in Simplified Chinese, 3 sentences max]
+[Same content in Simplified Chinese]
 偏向：[做多 📈 / 做空 📉 / 中性 ➡️]
 
 ---
 
 ₿ *Bitcoin Update*
-[3 sentences max in English covering: market move, key driver, sentiment]
+[3 sentences in English — strictly from the assigned perspective]
 Sentiment: [Bullish 📈 / Bearish 📉 / Neutral ➡️]
 
 ₿ *比特币更新*
-[Same content in Simplified Chinese, 3 sentences max]
+[Same content in Simplified Chinese]
 情绪：[看多 📈 / 看空 📉 / 中性 ➡️]
 
 RULES:
-- Maximum 3 sentences per section
-- Be factual, professional, and educational
-- Never guarantee profits or give financial advice
-- Use simple language that beginners can understand
-- Keep it concise — traders are busy"""
+- Stay strictly in your assigned perspective — do not blend all three angles
+- Reference specific prices and headlines from the data above
+- Be factual, professional, never guarantee profits or give financial advice
+- Maximum 3 sentences per English section"""
     return await _call_groq(prompt)
 
 
@@ -118,31 +156,61 @@ Respond in the same language the member used. If mixed, respond in English."""
     return await _call_groq(prompt)
 
 
-async def generate_mindset_content() -> Optional[str]:
+async def generate_mindset_content(topic: str = "discipline") -> Optional[str]:
     """
     Generate weekend trading mindset content — bilingual (EN + CN).
-    Topics rotate naturally via AI temperature variation.
+    topic: "discipline" | "risk" | "psychology"
+    Each topic produces a distinctly different post.
     """
-    prompt = """You are a professional trading coach for Elite by Infinity, a trading education community focused on Gold and Bitcoin.
 
-Write an inspiring and practical weekend trading mindset post for retail traders. Each time, pick a DIFFERENT real challenge traders face — examples: overtrading, FOMO entries, revenge trading, cutting winners too early, ignoring your own rules, emotional revenge after a stop-out, sizing too big after a win streak.
+    topic_instructions = {
+        "discipline": (
+            "TOPIC: Trading Discipline & Rule-Following\n"
+            "Write about the struggle of sticking to your trading plan when emotions kick in.\n"
+            "Examples: entering before confirmation, moving stop losses, skipping a valid setup\n"
+            "because of a recent loss, or overriding your own rules after a winning streak.\n"
+            "Give one specific, concrete action a trader can take this week to improve discipline."
+        ),
+        "risk": (
+            "TOPIC: Risk Management & Position Sizing\n"
+            "Write about how traders destroy accounts not from bad entries, but from bad sizing.\n"
+            "Examples: doubling down to recover losses, risking 10% on one trade out of conviction,\n"
+            "ignoring stop losses, or not accounting for correlated positions.\n"
+            "Give one specific rule about risk that every trader should tattoo on their brain."
+        ),
+        "psychology": (
+            "TOPIC: Trading Psychology & Emotional Control\n"
+            "Write about a specific emotional trap traders fall into — FOMO, revenge trading,\n"
+            "euphoria after a big win, paralysis after a loss, or obsessing over P&L mid-trade.\n"
+            "Be raw and honest. Name the emotion, explain exactly why it happens, and give\n"
+            "one practical mental technique to handle it in the moment."
+        ),
+    }
 
-FORMAT YOUR RESPONSE EXACTLY LIKE THIS:
+    angle = topic_instructions.get(topic, topic_instructions["discipline"])
+
+    prompt = f"""You are a professional trading coach for Elite by Infinity, a Gold and Bitcoin trading community.
+
+Write a weekend mindset post using the specific topic below. This is one of 3 versions — make it clearly focused on its own angle, not a generic mix.
+
+{angle}
+
+FORMAT YOUR RESPONSE EXACTLY LIKE THIS (no extra text outside this format):
 
 💭 *Weekend Trading Mindset*
 
-[Write 3–4 sentences in English. Be specific, honest, and actionable — not generic motivation. Name the real mistake, explain why traders do it, and give one concrete fix.]
+[3–4 sentences in English. Be specific, honest, direct. Name a real scenario traders face. Give one concrete takeaway.]
 
 💭 *周末交易心态*
 
-[Exact same content in Simplified Chinese, 3–4 sentences. Match the tone and specifics.]
+[Same content in Simplified Chinese, 3–4 sentences. Match tone and specifics exactly.]
 
 RULES:
+- Stay on the assigned topic — do not blend all three topics into one
+- Be direct and blunt, not fluffy or motivational-poster generic
+- Reference real trading scenarios (e.g. "after two red days in a row")
 - Never guarantee profits or give specific trade advice
-- Be direct and honest — real traders respect bluntness over fluff
-- Reference real scenarios (e.g. "after two losing trades in a row", "when price rockets past your entry")
-- Keep the English and Chinese versions consistent in meaning
-- Do NOT add any other text, labels, or disclaimers outside the format above"""
+- No extra headers, disclaimers, or labels outside the format"""
     return await _call_groq(prompt)
 
 
