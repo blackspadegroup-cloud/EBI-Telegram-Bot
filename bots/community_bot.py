@@ -527,44 +527,46 @@ async def cmd_stats(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 @admin_only
 async def cmd_pipeline(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     """Admin command: show high-intent potential clients from the last 7 days."""
-    events = get_recent_intent_events(days=7)
-    new_members = get_new_members(days=2)
-    high_intent = get_high_intent_members(min_score=3, days=7)
+    try:
+        events = get_recent_intent_events(days=7) or []
+        new_members = get_new_members(days=2) or []
+        high_intent = get_high_intent_members(min_score=3, days=7) or []
 
-    lines = ["📊 *Client Pipeline — Last 7 Days*\n"]
+        lines = ["📊 Client Pipeline — Last 7 Days\n"]
 
-    # New members in first 48 hours
-    lines.append(f"🆕 *New Members (last 48h):* {len(new_members)}")
-    for m in new_members[:5]:
-        display = f"@{m['username']}" if m.get('username') else m.get('first_name', 'Unknown')
-        lines.append(f"   • {display}")
-    if len(new_members) > 5:
-        lines.append(f"   _...and {len(new_members) - 5} more_")
+        # New members in first 48 hours
+        lines.append(f"🆕 New Members (last 48h): {len(new_members)}")
+        for m in new_members[:5]:
+            display = f"@{m['username']}" if m.get('username') else m.get('first_name', 'Unknown')
+            lines.append(f"   • {display}")
+        if len(new_members) > 5:
+            lines.append(f"   ...and {len(new_members) - 5} more")
 
-    lines.append("")
+        lines.append("")
 
-    # High intent members
-    lines.append(f"🎯 *High Intent Members (score ≥ 3):* {len(high_intent)}")
-    for m in high_intent[:8]:
-        display = f"@{m['username']}" if m.get('username') else m.get('name', 'Unknown')
-        labels = ", ".join(set(m.get('labels', [])))
-        lines.append(f"   • {display} — _{labels}_")
+        # High intent members
+        lines.append(f"🎯 High Intent Members (score 3+): {len(high_intent)}")
+        for m in high_intent[:8]:
+            display = f"@{m['username']}" if m.get('username') else m.get('name', 'Unknown')
+            labels = ", ".join(set(m.get('labels', [])))
+            lines.append(f"   • {display} — {labels}")
 
-    lines.append("")
+        lines.append("")
 
-    # Recent intent signals
-    lines.append(f"📡 *Recent Intent Signals:* {len(events)}")
-    for e in events[:5]:
-        display = f"@{e.get('username')}" if e.get('username') else e.get('first_name', 'Unknown')
-        lines.append(f"   • {display}: *{e.get('intent_label', '?')}*")
-        lines.append(f"     _{e.get('question', '')[:80]}_")
+        # Recent intent signals
+        lines.append(f"📡 Recent Intent Signals: {len(events)}")
+        for e in events[:5]:
+            display = f"@{e.get('username')}" if e.get('username') else e.get('first_name', 'Unknown')
+            question = e.get('question', '')[:80].replace('_', ' ')
+            lines.append(f"   • {display}: {e.get('intent_label', '?')}")
+            lines.append(f"     \"{question}\"")
 
-    lines.append(
-        "\n_Use /testdm <user\\_id> to send a test DM, "
-        "or contact them directly in the Potential Client Update group._"
-    )
+        lines.append("\nTip: Use /testdm [user_id] to verify DM access before reaching out.")
 
-    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text("\n".join(lines))
+    except Exception as e:
+        logger.error(f"cmd_pipeline error: {e}")
+        await update.message.reply_text(f"Pipeline error: {e}")
 
 
 @admin_only
