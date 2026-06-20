@@ -256,7 +256,19 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None
             return
 
     # ── 4. Group gating ───────────────────────────────────────────────────────
-    is_mentioned = bool(ctx.bot.username and f"@{ctx.bot.username}" in text)
+    bot_username = (ctx.bot.username or "").lower()
+    # Check via entities (most reliable) or plain text fallback
+    is_mentioned = False
+    if msg.entities:
+        for entity in msg.entities:
+            if entity.type == "mention":
+                mention = text[entity.offset:entity.offset + entity.length].lower()
+                if bot_username and mention == f"@{bot_username}":
+                    is_mentioned = True
+                    break
+    if not is_mentioned and bot_username:
+        is_mentioned = f"@{bot_username}" in text.lower()
+
     is_reply_to_bot = (
         msg.reply_to_message
         and msg.reply_to_message.from_user
@@ -279,6 +291,7 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None
 
     # ── 7. Declined topics ────────────────────────────────────────────────────
     question = text.replace(f"@{ctx.bot.username}", "").strip() if ctx.bot.username else text
+    question = question.strip()
     if not question:
         return
 
