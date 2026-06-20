@@ -43,9 +43,9 @@ async def run_all() -> None:
     log.info(f"Admin IDs: {config.ADMIN_IDS}")
     log.info("=" * 50)
 
-    # Build both bots
-    market_app, scheduler = build_market_bot()
-    community_app = build_community_bot()
+    # Build both bots (both return (Application, AsyncIOScheduler))
+    market_app, market_scheduler = build_market_bot()
+    community_app, community_scheduler = build_community_bot()
 
     # Graceful shutdown handler
     shutdown_event = asyncio.Event()
@@ -61,9 +61,10 @@ async def run_all() -> None:
             # Windows doesn't support add_signal_handler
             pass
 
-    # Start scheduler
-    scheduler.start()
-    log.info("APScheduler started")
+    # Start both schedulers
+    market_scheduler.start()
+    community_scheduler.start()
+    log.info("APSchedulers started (market + community)")
 
     # Initialize both bot applications
     await market_app.initialize()
@@ -83,7 +84,8 @@ async def run_all() -> None:
 
     # Graceful shutdown
     log.info("Shutting down bots...")
-    scheduler.shutdown(wait=False)
+    market_scheduler.shutdown(wait=False)
+    community_scheduler.shutdown(wait=False)
     await market_app.updater.stop()
     await community_app.updater.stop()
     await market_app.stop()

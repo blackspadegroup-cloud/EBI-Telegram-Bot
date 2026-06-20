@@ -158,3 +158,241 @@ def log_qa(telegram_id: int, question: str, answer: str) -> None:
         }).execute()
     except Exception as e:
         log.error(f"log_qa failed: {e}")
+
+
+# ── Onboarding Sequence Tracking ─────────────────────────────────────────────
+# Tracks which DM sequence step each member has received.
+# Uses bot_state table: key = "onboarding_step:{telegram_id}", value = step number (0–3)
+
+def get_onboarding_step(telegram_id: int) -> int:
+    """Return the last completed onboarding step (0 = none sent yet)."""
+    return int(get_state(f"onboarding_step:{telegram_id}", 0))
+
+
+def set_onboarding_step(telegram_id: int, step: int) -> None:
+    """Mark that a given onboarding step has been sent."""
+    set_state(f"onboarding_step:{telegram_id}", step)
+
+
+def get_members_for_onboarding(step: int, days_since_join: int) -> list[dict]:
+    """
+    Return members who joined exactly `days_since_join` days ago
+    and have not yet received `step`.
+    Uses telegram_subscribers joined_at column.
+    """
+    try:
+        from datetime import timedelta
+        target_date = (datetime.now(timezone.utc) - timedelta(days=days_since_join)).date().isoformat()
+        result = (
+            get_db().table("telegram_subscribers")
+            .select("chat_id, first_name")
+            .gte("joined_at", f"{target_date}T00:00:00Z")
+            .lt("joined_at", f"{target_date}T23:59:59Z")
+            .eq("blocked", False)
+            .execute()
+        )
+        members = result.data or []
+        # Filter to those who haven't had this step yet
+        pending = []
+        for m in members:
+            current_step = get_onboarding_step(m["chat_id"])
+            if current_step < step:
+                pending.append(m)
+        return pending
+    except Exception as e:
+        log.error(f"get_members_for_onboarding failed: {e}")
+        return []
+
+
+# ── Intent Scoring ────────────────────────────────────────────────────────────
+# Tracks cumulative intent score per member.
+# key = "intent_score:{telegram_id}", value = int score
+
+def get_intent_score(telegram_id: int) -> int:
+    return int(get_state(f"intent_score:{telegram_id}", 0))
+
+
+def add_intent_score(telegram_id: int, points: int) -> int:
+    """Add points to a member's intent score. Returns new total."""
+    current = get_intent_score(telegram_id)
+    new_score = current + points
+    set_state(f"intent_score:{telegram_id}", new_score)
+    return new_score
+
+
+def log_intent_event(telegram_id: int, username: str, first_name: str,
+                     question: str, intent_label: str, score: int) -> None:
+    """Log a high-intent interaction for the potential client pipeline."""
+    try:
+        get_db().table("bot_intent_events").insert({
+            "telegram_id": telegram_id,
+            "username": username or "",
+            "first_name": first_name or "",
+            "question": question[:500],
+            "intent_label": intent_label,
+            "score_delta": score,
+        }).execute()
+    except Exception as e:
+        log.error(f"log_intent_event failed: {e}")
+
+
+def get_high_intent_members(min_score: int = 5, days: int = 7) -> list[dict]:
+    """Return members with intent score >= min_score in the last N days."""
+    try:
+        from datetime import timedelta
+        since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        result = (
+            get_db().table("bot_intent_events")
+            .select("telegram_id, username, first_name, intent_label, created_at")
+            .gte("created_at", since)
+            .execute()
+        )
+        # Aggregate by telegram_id
+        from collections import defaultdict
+        scores: dict = defaultdict(lambda: {"score": 0, "labels": [], "name": "", "username": ""})
+        for row in (result.data or []):
+            tid = row["telegram_id"]
+            scores[tid]["score"] += 1
+            scores[tid]["labels"].append(row["intent_label"])
+            scores[tid]["name"] = row["first_name"]
+            scores[tid]["username"] = row["username"]
+        return [
+            {"telegram_id": tid, **data}
+            for tid, data in scores.items()
+            if data["score"] >= min_score
+        ]
+    except Exception as e:
+        log.error(f"get_high_intent_members failed: {e}")
+        return []
+
+
+def get_recent_intent_events(days: int = 7) -> list[dict]:
+    """Return all intent events from the last N days for pipeline view."""
+    try:
+        from datetime import timedelta
+        since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        result = (
+            get_db().table("bot_intent_events")
+            .select("*")
+            .gte("created_at", since)
+            .order("created_at", desc=True)
+            .limit(50)
+            .execute()
+        )
+        return result.data or []
+    except Exception as e:
+        log.error(f"get_recent_intent_events failed: {e}")
+        return []
+
+
+def get_new_members(days: int = 2) -> list[dict]:
+    """Return members who joined in the last N days (prime follow-up window)."""
+    try:
+        from datetime import timedelta
+        since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        result = (
+            get_db().table("telegram_subscribers")
+            .select("chat_id, username, first_name, joined_at")
+            .gte("joined_at", since)
+            .eq("blocked", False)
+            .execute()
+        )
+        return result.data or []
+    except Exception as e:
+        log.error(f"get_new_members failed: {e}")
+        return []
+
+
+def get_dormant_members(inactive_days: int = 21) -> list[dict]:
+    """
+    Return members who have been in the group for 21+ days
+    but have zero Q&A interactions in the last 21 days.
+    """
+    try:
+        from datetime import timedelta
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=inactive_days)).isoformat()
+        # Get all members who joined before the cutoff
+        result = (
+            get_db().table("telegram_subscribers")
+            .select("chat_id, first_name, username")
+            .lt("joined_at", cutoff)
+            .eq("blocked", False)
+            .execute()
+        )
+        members = result.data or []
+
+        # Filter out those who have recent Q&A activity
+        active_ids_result = (
+            get_db().table("bot_qa_interactions")
+            .select("telegram_id")
+            .gte("created_at", cutoff)
+            .execute()
+        )
+        active_ids = {r["telegram_id"] for r in (active_ids_result.data or [])}
+        # Also check who was already re-engaged recently
+        return [m for m in members if m["chat_id"] not in active_ids]
+    except Exception as e:
+        log.error(f"get_dormant_members failed: {e}")
+        return []
+
+
+def get_milestone_members(days_in_group: int = 30) -> list[dict]:
+    """Return members who joined exactly `days_in_group` days ago (milestone check)."""
+    try:
+        from datetime import timedelta
+        target_date = (datetime.now(timezone.utc) - timedelta(days=days_in_group)).date().isoformat()
+        result = (
+            get_db().table("telegram_subscribers")
+            .select("chat_id, first_name, username")
+            .gte("joined_at", f"{target_date}T00:00:00Z")
+            .lt("joined_at", f"{target_date}T23:59:59Z")
+            .eq("blocked", False)
+            .execute()
+        )
+        return result.data or []
+    except Exception as e:
+        log.error(f"get_milestone_members failed: {e}")
+        return []
+
+
+# ── Moderation ────────────────────────────────────────────────────────────────
+# Uses bot_state table for mute/ban flags and violation counts.
+# Key format: "muted:{telegram_id}", "banned:{telegram_id}", "violations:{telegram_id}"
+
+def is_user_muted(telegram_id: int) -> bool:
+    return bool(get_state(f"muted:{telegram_id}", False))
+
+
+def is_user_banned(telegram_id: int) -> bool:
+    return bool(get_state(f"banned:{telegram_id}", False))
+
+
+def mute_user(telegram_id: int) -> None:
+    set_state(f"muted:{telegram_id}", True)
+
+
+def unmute_user(telegram_id: int) -> None:
+    set_state(f"muted:{telegram_id}", False)
+
+
+def ban_user(telegram_id: int) -> None:
+    set_state(f"banned:{telegram_id}", True)
+
+
+def unban_user(telegram_id: int) -> None:
+    set_state(f"banned:{telegram_id}", False)
+
+
+def get_violations(telegram_id: int) -> int:
+    return int(get_state(f"violations:{telegram_id}", 0))
+
+
+def increment_violations(telegram_id: int) -> int:
+    """Increment violation count and return the new total."""
+    count = get_violations(telegram_id) + 1
+    set_state(f"violations:{telegram_id}", count)
+    return count
+
+
+def reset_violations(telegram_id: int) -> None:
+    set_state(f"violations:{telegram_id}", 0)
