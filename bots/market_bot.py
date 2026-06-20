@@ -18,7 +18,7 @@ Admin commands: /testnews, /testmindset, /pause, /resume, /stats, /broadcast, /h
 
 import asyncio
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 import pytz
@@ -187,12 +187,17 @@ async def post_for_approval(bot: Bot, content_type: str = "market") -> None:
             reply_markup=skip_keyboard,
         )
 
-        # ── Schedule 30-min auto-send ──────────────────────────────────────
-        task = asyncio.create_task(_auto_send(uid, bot, versions[0]))
+        # ── Calculate exact post time (30 min from now = scheduled slot) ──
+        tz = pytz.timezone(config.TIMEZONE)
+        target_time = datetime.now(tz) + timedelta(minutes=30)
+
+        # ── Schedule auto-send at target time ─────────────────────────────
+        task = asyncio.create_task(_auto_send(uid, bot, versions[0], target_time))
         _pending_approvals[uid] = {
             "versions": versions,
             "task": task,
             "sent": False,
+            "target_time": target_time,
         }
         log.info(f"Approval request sent (uid={uid}, {len(versions)} versions, type={content_type})")
 
@@ -200,9 +205,13 @@ async def post_for_approval(bot: Bot, content_type: str = "market") -> None:
         log.error(f"post_for_approval failed: {e}", exc_info=True)
 
 
-async def _auto_send(uid: str, bot: Bot, version_1: str) -> None:
-    """Auto-send Version 1 after 30 minutes if no manual selection was made."""
-    await asyncio.sleep(30 * 60)  # 30 minutes
+async def _auto_send(uid: str, bot: Bot, version_1: str, target_time: datetime) -> None:
+    """Auto-send Version 1 at the scheduled post time if no manual selection was made."""
+    tz = pytz.timezone(config.TIMEZONE)
+    now = datetime.now(tz)
+    delay = (target_time - now).total_seconds()
+    if delay > 0:
+        await asyncio.sleep(delay)
 
     pending = _pending_approvals.get(uid)
     if not pending or pending["sent"]:
@@ -219,11 +228,11 @@ async def _auto_send(uid: str, bot: Bot, version_1: str) -> None:
         )
         await bot.send_message(
             chat_id=config.APPROVAL_GROUP_ID,
-            text="⏰ *Auto-sent Version 1* to the community group (30-min timeout reached).",
+            text=f"⏰ *Auto-sent Version 1* to the community at {target_time.strftime('%H:%M')} SGT (no selection made).",
             parse_mode=ParseMode.MARKDOWN,
         )
         log_message("market_bot", "auto_send", version_1, config.MARKET_GROUP_ID)
-        log.info(f"Auto-sent Version 1 for uid={uid}")
+        log.info(f"Auto-sent Version 1 for uid={uid} at {target_time.strftime('%H:%M')}")
     except Exception as e:
         log.error(f"Auto-send failed for uid={uid}: {e}")
 
@@ -284,6 +293,22 @@ async def handle_approval_callback(update: Update, ctx: ContextTypes.DEFAULT_TYP
         return
 
     content = pending["versions"][v_idx]
+    target_time = pending.get("target_time")
+
+    # Confirm selection immediately
+    tz = pytz.timezone(config.TIMEZONE)
+    post_time_str = target_time.strftime("%H:%M") if target_time else "now"
+    await query.edit_message_text(
+        f"✅ *Version {choice} selected!*\n⏰ Posting to community at *{post_time_str} SGT*.",
+        parse_mode=ParseMode.MARKDOWN,
+    )
+
+    # Wait until the scheduled post time
+    if target_time:
+        now = datetime.now(tz)
+        delay = (target_time - now).total_seconds()
+        if delay > 0:
+            await asyncio.sleep(delay)
 
     try:
         await ctx.bot.send_message(
@@ -291,12 +316,19 @@ async def handle_approval_callback(update: Update, ctx: ContextTypes.DEFAULT_TYP
             text=content,
             parse_mode=ParseMode.MARKDOWN,
         )
-        await query.edit_message_text(f"✅ *Version {choice} sent* to the community group!")
+        await ctx.bot.send_message(
+            chat_id=config.APPROVAL_GROUP_ID,
+            text=f"📤 *Version {choice} posted* to community at {post_time_str} SGT.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
         log_message("market_bot", "approved", content, config.MARKET_GROUP_ID)
-        log.info(f"Version {choice} approved and sent (uid={uid}) by {update.effective_user.id}")
+        log.info(f"Version {choice} approved and posted at {post_time_str} (uid={uid}) by {update.effective_user.id}")
     except Exception as e:
         log.error(f"Failed to send approved version uid={uid}: {e}")
-        await query.edit_message_text(f"❌ Failed to send: {e}")
+        await ctx.bot.send_message(
+            chat_id=config.APPROVAL_GROUP_ID,
+            text=f"❌ Failed to post Version {choice}: {e}",
+        )
 
 
 # ── Breaking news (direct post — no approval needed) ─────────────────────────
@@ -381,9 +413,10 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         "/broadcast `<message>` – Send a custom message to the group\n"
         "/help – Show this message\n\n"
         "📅 *Schedule (SGT)*\n"
-        "Mon–Fri  07:00, 14:00, 19:00 → Market update\n"
-        "Sat–Sun  20:00 → Trading mindset post\n"
-        "Both go to approval group first."
+        "Mon–Fri  06:30, 13:30, 18:30 → Approval versions sent\n"
+        "Mon–Fri  07:00, 14:00, 19:00 → Posts to community\n"
+        "Sat–Sun  19:30 → Approval versions sent\n"
+        "Sat–Sun  20:00 → Posts to community"
     )
     await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
 
@@ -503,26 +536,27 @@ def build_market_bot() -> tuple[Application, AsyncIOScheduler]:
     scheduler = AsyncIOScheduler(timezone=tz)
     bot = app.bot
 
-    # Market updates: Mon–Fri at 07:00, 14:00, 19:00
-    for hour in [7, 14, 19]:
+    # Market updates: Mon–Fri, 30 min before post time → approval at 06:30, 13:30, 18:30
+    # Community group receives the post at 07:00, 14:00, 19:00
+    for hour, minute in [(6, 30), (13, 30), (18, 30)]:
         scheduler.add_job(
             post_for_approval,
             trigger="cron",
             day_of_week="mon-fri",
             hour=hour,
-            minute=0,
+            minute=minute,
             args=[bot, "market"],
-            id=f"market_update_{hour:02d}h",
+            id=f"market_update_{hour:02d}h{minute:02d}",
             replace_existing=True,
         )
 
-    # Weekend mindset: Sat–Sun at 20:00
+    # Weekend mindset: Sat–Sun, approval at 19:30 → posts at 20:00
     scheduler.add_job(
         post_for_approval,
         trigger="cron",
         day_of_week="sat,sun",
-        hour=20,
-        minute=0,
+        hour=19,
+        minute=30,
         args=[bot, "mindset"],
         id="weekend_mindset",
         replace_existing=True,
@@ -550,9 +584,8 @@ def build_market_bot() -> tuple[Application, AsyncIOScheduler]:
 
     log.info(
         f"Market bot configured. "
-        f"Mon–Fri market updates: 07:00, 14:00, 19:00 {config.TIMEZONE} → approval group. "
-        f"Sat–Sun mindset: 20:00 → approval group. "
-        f"Approval group: {config.APPROVAL_GROUP_ID}. "
-        f"Community group: {config.MARKET_GROUP_ID}."
+        f"Approval sent at 06:30/13:30/18:30, posts to community at 07:00/14:00/19:00 (Mon–Fri). "
+        f"Weekend mindset approval at 19:30, posts at 20:00 (Sat–Sun). "
+        f"Timezone: {config.TIMEZONE}."
     )
     return app, scheduler
