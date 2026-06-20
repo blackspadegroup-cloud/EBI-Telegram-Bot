@@ -55,11 +55,10 @@ from services.formatter import (
 )
 from services.news import (
     check_for_breaking_news,
-    fetch_btc_news,
     fetch_gold_news,
     format_headlines_for_ai,
 )
-from services.prices import get_btc_data, get_gold_data
+from services.prices import get_gold_data
 from utils.logger import get_logger
 
 log = get_logger("market_bot")
@@ -105,21 +104,19 @@ async def post_for_approval(bot: Bot, content_type: str = "market") -> None:
         versions = []
 
         if content_type == "market":
-            # Fetch price + news data once, then generate 3 AI versions concurrently
-            gold_data, btc_data, gold_news, btc_news = await asyncio.gather(
+            # Fetch gold price + news + today's high-impact events concurrently
+            gold_data, gold_news, events = await asyncio.gather(
                 get_gold_data(),
-                get_btc_data(),
                 fetch_gold_news(hours_back=6),
-                fetch_btc_news(hours_back=6),
+                get_events_to_alert(alert_window_minutes=480),  # events in next 8 hours
             )
             gold_data["news_headlines"] = format_headlines_for_ai(gold_news)
-            btc_data["news_headlines"] = format_headlines_for_ai(btc_news)
-            header = format_price_header(gold_data, btc_data)
+            header = format_price_header(gold_data)
 
             ai_results = await asyncio.gather(
-                generate_market_update(gold_data, btc_data, perspective="technical"),
-                generate_market_update(gold_data, btc_data, perspective="fundamental"),
-                generate_market_update(gold_data, btc_data, perspective="sentiment"),
+                generate_market_update(gold_data, perspective="technical", events=events),
+                generate_market_update(gold_data, perspective="fundamental", events=events),
+                generate_market_update(gold_data, perspective="sentiment", events=events),
             )
             for result in ai_results:
                 if result:
@@ -375,8 +372,9 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     """Show available admin commands."""
     text = (
         "🤖 *Market Bot – Admin Commands*\n\n"
-        "/testnews – Generate 3 market update versions for approval\n"
+        "/testnews – Generate 3 Gold update versions for approval\n"
         "/testmindset – Generate 3 mindset post versions for approval\n"
+        "/share `<url>` [caption] – Share a link to the community group\n"
         "/pause – Pause all scheduled posts\n"
         "/resume – Resume all scheduled posts\n"
         "/stats – View bot statistics\n"
@@ -446,6 +444,38 @@ async def cmd_broadcast(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text("✅ Broadcast sent.")
 
 
+@admin_only
+async def cmd_share(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Share a link (Instagram, YouTube, etc.) to the community group.
+    Usage: /share <url> [optional caption]
+    Example: /share https://www.instagram.com/reel/abc123/ Check out our latest Reel!
+    """
+    if not ctx.args:
+        await update.message.reply_text(
+            "Usage: /share <url> [optional caption]\n"
+            "Example: /share https://instagram.com/reel/xyz Check out our latest Reel!"
+        )
+        return
+
+    args = ctx.args
+    url = args[0]
+    caption = " ".join(args[1:]) if len(args) > 1 else ""
+
+    if caption:
+        message = f"📲 {caption}\n\n{url}"
+    else:
+        message = f"📲 {url}"
+
+    await ctx.bot.send_message(
+        chat_id=config.MARKET_GROUP_ID,
+        text=message,
+        disable_web_page_preview=False,  # Shows link preview (Instagram/YouTube card)
+    )
+    log_message("market_bot", "share", message, config.MARKET_GROUP_ID)
+    await update.message.reply_text("✅ Shared to community group.")
+
+
 # ── Bot builder ───────────────────────────────────────────────────────────────
 
 def build_market_bot() -> tuple[Application, AsyncIOScheduler]:
@@ -463,6 +493,7 @@ def build_market_bot() -> tuple[Application, AsyncIOScheduler]:
     app.add_handler(CommandHandler("resume", cmd_resume))
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("broadcast", cmd_broadcast))
+    app.add_handler(CommandHandler("share", cmd_share))
 
     # Inline button handler for approval group
     app.add_handler(CallbackQueryHandler(handle_approval_callback, pattern=r"^approve:"))

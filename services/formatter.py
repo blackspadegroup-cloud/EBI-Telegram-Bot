@@ -11,16 +11,15 @@ import pytz
 from config import config
 
 
-def format_price_header(gold: dict, btc: dict) -> str:
+def format_price_header(gold: dict) -> str:
     """
     Build the price snapshot header shown at the top of each market update.
 
     Example:
-        ─────────────────────────
+        ━━━━━━━━━━━━━━━━━━━━━━━
         🕐 07:02 SGT | Thu 18 Jun
-        🥇 Gold   $2,345.60  +0.42%
-        ₿  BTC   $67,420     +1.23%
-        ─────────────────────────
+        🥇 Gold   $2,345.60  📈 +0.42%
+        ━━━━━━━━━━━━━━━━━━━━━━━
     """
     tz = pytz.timezone(config.TIMEZONE)
     now = datetime.now(tz)
@@ -29,14 +28,10 @@ def format_price_header(gold: dict, btc: dict) -> str:
     gold_price = f"${gold['price']:,.2f}"
     gold_change = _format_change(gold["change_pct"])
 
-    btc_price = f"${btc['price']:,.0f}"
-    btc_change = _format_change(btc["change_pct"])
-
     return (
         f"━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"🕐 {time_str}\n"
         f"🥇 Gold   {gold_price}   {gold_change}\n"
-        f"₿  BTC    {btc_price}   {btc_change}\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━\n\n"
     )
 

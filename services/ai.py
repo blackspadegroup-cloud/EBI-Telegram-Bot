@@ -25,13 +25,13 @@ _client = Groq(api_key=config.GROQ_API_KEY)
 
 async def generate_market_update(
     gold_data: dict,
-    btc_data: dict,
-    perspective: str = "balanced",
+    perspective: str = "fundamental",
+    events: list | None = None,
 ) -> Optional[str]:
     """
-    Generate a bilingual market update (English + Chinese) for Gold and Bitcoin.
+    Generate a bilingual Gold-only market update (English + Chinese).
     perspective: "technical" | "fundamental" | "sentiment"
-    Each perspective produces distinctly different content.
+    events: list of today's high-impact economic events (optional)
     """
 
     perspective_instructions = {
@@ -47,26 +47,35 @@ async def generate_market_update(
         "fundamental": (
             "PERSPECTIVE: Fundamental & News-Driven\n"
             "Focus ONLY on the news headlines and macro drivers provided:\n"
-            "- What specific news or event is moving the market\n"
-            "- The macro backdrop (USD, inflation, Fed, risk appetite)\n"
-            "- Why this fundamental factor matters for Gold or BTC right now\n"
+            "- What specific news or event is moving the market today\n"
+            "- The macro backdrop (USD strength, inflation, Fed policy, risk appetite)\n"
+            "- Why this fundamental factor matters for Gold right now\n"
             "Reference the actual headlines given. No generic commentary."
         ),
         "sentiment": (
             "PERSPECTIVE: Market Sentiment & Trader Psychology\n"
-            "Focus ONLY on what traders and the crowd are doing:\n"
+            "Focus ONLY on what traders and the crowd are doing with Gold:\n"
             "- Is the market fearful or greedy right now?\n"
             "- Are traders chasing, fading, or sitting on the sidelines?\n"
-            "- What traps or opportunities does the current sentiment create?\n"
-            "- What should a disciplined trader watch for emotionally?\n"
+            "- What traps or opportunities does current sentiment create?\n"
+            "- What should a disciplined Gold trader watch for emotionally?\n"
             "Make it feel like a senior trader talking to his team."
         ),
     }
 
     angle = perspective_instructions.get(perspective, perspective_instructions["fundamental"])
 
-    prompt = f"""You are a professional market analyst for Elite by Infinity, a trading community.
-Write a market update using the SPECIFIC PERSPECTIVE below. This is one of 3 different versions — make it clearly distinct in angle and insight.
+    events_section = ""
+    if events:
+        event_lines = "\n".join(
+            f"- {e.get('name','Event')} ({e.get('country','')}) — "
+            f"Previous: {e.get('previous','N/A')}, Forecast: {e.get('forecast','N/A')}"
+            for e in events
+        )
+        events_section = f"\nTODAY'S HIGH-IMPACT ECONOMIC EVENTS 🔴:\n{event_lines}\n(Mention these if they are relevant to Gold's move or outlook.)"
+
+    prompt = f"""You are a professional market analyst for Elite by Infinity, a Gold trading community.
+Write a Gold-only market update using the SPECIFIC PERSPECTIVE below. This is one of 3 versions — make it clearly distinct in angle and insight.
 
 {angle}
 
@@ -74,37 +83,23 @@ GOLD (XAUUSD) DATA:
 - Current Price: ${gold_data.get('price', 'N/A')}
 - 24h Change: {gold_data.get('change_pct', 'N/A')}%
 - Recent News Headlines: {gold_data.get('news_headlines', 'No recent news')}
+{events_section}
 
-BITCOIN (BTC) DATA:
-- Current Price: ${btc_data.get('price', 'N/A')}
-- 24h Change: {btc_data.get('change_pct', 'N/A')}%
-- Market Cap: ${btc_data.get('market_cap', 'N/A')}
-- Recent News Headlines: {btc_data.get('news_headlines', 'No recent news')}
+FORMAT YOUR RESPONSE EXACTLY LIKE THIS (no other sections, Gold only):
 
-FORMAT YOUR RESPONSE EXACTLY LIKE THIS:
-
-🥇 *Gold Update*
-[3 sentences in English — strictly from the assigned perspective]
+🥇 *Gold Market Update*
+[3 sentences in English — strictly from the assigned perspective. Reference actual price/news/events from the data above.]
 Bias: [Bullish 📈 / Bearish 📉 / Neutral ➡️]
 
-🥇 *黄金更新*
-[Same content in Simplified Chinese]
+🥇 *黄金市场更新*
+[Same content in Simplified Chinese, 3 sentences]
 偏向：[做多 📈 / 做空 📉 / 中性 ➡️]
 
----
-
-₿ *Bitcoin Update*
-[3 sentences in English — strictly from the assigned perspective]
-Sentiment: [Bullish 📈 / Bearish 📉 / Neutral ➡️]
-
-₿ *比特币更新*
-[Same content in Simplified Chinese]
-情绪：[看多 📈 / 看空 📉 / 中性 ➡️]
-
 RULES:
-- Stay strictly in your assigned perspective — do not blend all three angles
-- Reference specific prices and headlines from the data above
-- Be factual, professional, never guarantee profits or give financial advice
+- Gold ONLY — do not mention Bitcoin or other assets
+- Stay strictly in your assigned perspective
+- Reference the specific price, headlines, and events provided
+- Be factual and professional — never guarantee profits or give financial advice
 - Maximum 3 sentences per English section"""
     return await _call_groq(prompt)
 
