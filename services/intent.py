@@ -108,13 +108,16 @@ INTENT_RULES: list[tuple[list[str], str, int, bool]] = [
 # ── Soft CTA templates by intent level ────────────────────────────────────────
 
 SOFT_CTA_HIGH = (
-    "\n\n💼 *Thinking about getting started?* If you'd like to explore "
-    "trading with a trusted broker, feel free to DM an admin — we're here to help. 🚀"
+    "\n\n💼 Interested in starting live trading? "
+    "We work with AIMS FX — a trusted broker with a $100 minimum deposit. "
+    "More importantly, our team offers 1-on-1 education to guide you from zero to your first live trade. "
+    "Reply here and an admin will reach out to you personally. 🚀"
 )
 
 SOFT_CTA_MEDIUM = (
-    "\n\n📌 _If you ever want to take the next step and start live trading, "
-    "just ask an admin — we'll point you in the right direction._"
+    "\n\n📌 When you're ready to take the next step, our team is here. "
+    "We offer 1-on-1 guidance for new traders through AIMS FX — no pressure, just real support. "
+    "Feel free to ask an admin anytime."
 )
 
 
