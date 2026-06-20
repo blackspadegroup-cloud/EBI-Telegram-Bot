@@ -20,8 +20,8 @@ class Config:
     ]
 
     # ── AI ────────────────────────────────────────────────────
-    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
-    GEMINI_MODEL: str = "gemini-1.5-flash"  # Free tier model
+    GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
+    GROQ_MODEL: str = "llama-3.3-70b-versatile"  # Free tier model
 
     # ── Database ──────────────────────────────────────────────
     SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
@@ -54,7 +54,7 @@ class Config:
             "COMMUNITY_BOT_TOKEN": self.COMMUNITY_BOT_TOKEN,
             "MARKET_GROUP_ID": self.MARKET_GROUP_ID,
             "COMMUNITY_GROUP_ID": self.COMMUNITY_GROUP_ID,
-            "GEMINI_API_KEY": self.GEMINI_API_KEY,
+            "GROQ_API_KEY": self.GROQ_API_KEY,
             "SUPABASE_URL": self.SUPABASE_URL,
             "SUPABASE_KEY": self.SUPABASE_KEY,
         }

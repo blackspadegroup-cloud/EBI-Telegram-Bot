@@ -1,36 +1,34 @@
 """
-services/ai.py – Google Gemini AI service.
+services/ai.py – Groq AI service.
 
 Free tier limits:
-  - 15 requests per minute
-  - 1,000,000 tokens per day
-  - Model: gemini-2.0-flash
+  - 30 requests per minute
+  - 14,400 requests per day
+  - Model: llama-3.3-70b-versatile
 
-Sign up at: https://aistudio.google.com/app/apikey
+Sign up at: https://console.groq.com
 """
 
 import asyncio
 from typing import Optional
 
-from google import genai
+from groq import Groq
 
 from config import config
 from utils.logger import get_logger
 
 log = get_logger("ai_service")
 
-# Initialise Gemini client once at import
-_client = genai.Client(api_key=config.GEMINI_API_KEY)
+# Initialise Groq client once at import
+_client = Groq(api_key=config.GROQ_API_KEY)
 
 
 async def generate_market_update(gold_data: dict, btc_data: dict) -> Optional[str]:
     """
     Generate a bilingual market update (English + Chinese) for Gold and Bitcoin.
-
     Returns a formatted Telegram message string, or None on failure.
     """
-    prompt = f"""
-You are a professional market analyst for a trading community.
+    prompt = f"""You are a professional market analyst for a trading community.
 Write a concise market update based on the data below.
 
 GOLD (XAUUSD) DATA:
@@ -69,19 +67,14 @@ RULES:
 - Be factual, professional, and educational
 - Never guarantee profits or give financial advice
 - Use simple language that beginners can understand
-- Keep it concise — traders are busy
-"""
-    return await _call_gemini(prompt)
+- Keep it concise — traders are busy"""
+    return await _call_groq(prompt)
 
 
 async def generate_breaking_news_alert(headline: str, asset: str) -> Optional[str]:
-    """
-    Summarize a breaking news headline into a short bilingual alert.
-    asset: 'gold', 'bitcoin', or 'both'
-    """
+    """Summarize a breaking news headline into a short bilingual alert."""
     asset_emoji = {"gold": "🥇", "bitcoin": "₿", "both": "🥇₿"}.get(asset, "📰")
-    prompt = f"""
-You are a market news analyst. A breaking news headline just dropped that affects {asset}.
+    prompt = f"""You are a market news analyst. A breaking news headline just dropped that affects {asset}.
 
 HEADLINE: {headline}
 
@@ -101,18 +94,13 @@ FORMAT EXACTLY:
 RULES:
 - Be factual, no speculation beyond direct market impact
 - Do not give trading advice or profit guarantees
-- Keep it under 100 words total
-"""
-    return await _call_gemini(prompt)
+- Keep it under 100 words total"""
+    return await _call_groq(prompt)
 
 
 async def answer_trading_question(question: str, context: str = "") -> Optional[str]:
-    """
-    Answer a trading/community question from a member.
-    Returns a friendly, educational response.
-    """
-    prompt = f"""
-You are a friendly AI assistant for "{config.COMMUNITY_NAME}", a trading community focused on Gold (XAUUSD) and Bitcoin.
+    """Answer a trading/community question from a member."""
+    prompt = f"""You are a friendly AI assistant for "{config.COMMUNITY_NAME}", a trading community focused on Gold (XAUUSD) and Bitcoin.
 
 MEMBER QUESTION: {question}
 {f"CONTEXT: {context}" if context else ""}
@@ -124,27 +112,15 @@ RULES:
 4. NEVER recommend buying or selling specific assets
 5. Always encourage proper risk management
 6. If you don't know something, say so honestly — don't guess
-7. If the question is about technical analysis, explain concepts simply
-8. Use relevant emojis sparingly to keep it engaging
+7. Use relevant emojis sparingly to keep it engaging
 
-TOPICS YOU CAN HELP WITH:
-- Basic trading education (what is support/resistance, candlesticks, etc.)
-- Gold market basics (what moves gold, USD relationship, central banks)
-- Bitcoin basics (what it is, how it works, why it's volatile)
-- Economic concepts (CPI, FOMC, NFP, interest rates)
-- Risk management basics (stop loss, position sizing)
-- Community FAQs (how the group works, what the bot does)
-- Trading terminology
-
-Respond in the same language the member used. If mixed, respond in English.
-"""
-    return await _call_gemini(prompt)
+Respond in the same language the member used. If mixed, respond in English."""
+    return await _call_groq(prompt)
 
 
 async def generate_economic_event_alert(event: dict) -> Optional[str]:
     """Generate a pre-event alert for a high-impact economic release."""
-    prompt = f"""
-Write a short bilingual alert for a trading community about an upcoming high-impact economic event.
+    prompt = f"""Write a short bilingual alert for a trading community about an upcoming high-impact economic event.
 
 EVENT: {event.get('name', 'Economic Event')}
 COUNTRY: {event.get('country', 'US')}
@@ -167,29 +143,30 @@ FORMAT EXACTLY:
 ⚠️ _Expect volatility on Gold and Bitcoin. Manage risk carefully._
 ⚠️ _黄金和比特币可能出现波动，请谨慎管理风险。_
 
-Keep it under 80 words. Be factual and professional.
-"""
-    return await _call_gemini(prompt)
+Keep it under 80 words. Be factual and professional."""
+    return await _call_groq(prompt)
 
 
 # ── Internal helper ───────────────────────────────────────────────────────────
 
-async def _call_gemini(prompt: str, retries: int = 2) -> Optional[str]:
-    """Call Gemini API with retry logic. Runs in a thread to keep async."""
+async def _call_groq(prompt: str, retries: int = 2) -> Optional[str]:
+    """Call Groq API with retry logic. Runs in a thread to keep async."""
     for attempt in range(retries + 1):
         try:
             loop = asyncio.get_event_loop()
             response = await loop.run_in_executor(
                 None,
-                lambda: _client.models.generate_content(
-                    model=config.GEMINI_MODEL,
-                    contents=prompt,
+                lambda: _client.chat.completions.create(
+                    model=config.GROQ_MODEL,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=1024,
+                    temperature=0.7,
                 )
             )
-            return response.text.strip()
+            return response.choices[0].message.content.strip()
         except Exception as e:
-            log.warning(f"Gemini attempt {attempt + 1} failed: {e}")
+            log.warning(f"Groq attempt {attempt + 1} failed: {e}")
             if attempt < retries:
-                await asyncio.sleep(2 ** attempt)  # Exponential backoff
-    log.error("All Gemini retries exhausted")
+                await asyncio.sleep(2 ** attempt)
+    log.error("All Groq retries exhausted")
     return None
