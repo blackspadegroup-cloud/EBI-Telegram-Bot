@@ -16,6 +16,8 @@ import asyncio
 import signal
 import sys
 
+from telegram import Update
+
 from config import config
 from utils.logger import get_logger
 from bots.market_bot import build_market_bot
@@ -74,8 +76,14 @@ async def run_all() -> None:
     await market_app.start()
     await community_app.start()
 
+    # NOTE: Telegram does NOT deliver `chat_member` updates by default — they must
+    # be explicitly requested via allowed_updates. The community bot relies on these
+    # to detect new members and send welcome messages, so we opt into ALL update types.
     await market_app.updater.start_polling(drop_pending_updates=True)
-    await community_app.updater.start_polling(drop_pending_updates=True)
+    await community_app.updater.start_polling(
+        drop_pending_updates=True,
+        allowed_updates=Update.ALL_TYPES,
+    )
 
     log.info("✅ Both bots are running. Press Ctrl+C to stop.")
 

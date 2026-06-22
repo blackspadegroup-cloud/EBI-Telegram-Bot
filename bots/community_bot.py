@@ -520,6 +520,7 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         "/reload — Reload admin IDs from env\n\n"
         "*Info & Testing*\n"
         "/stats — View member and message stats\n"
+        "/testwelcome — Fire the welcome flow on yourself (group + DM)\n"
         "/testdm `<user_id>` — Send a test DM to a user\n"
         "/help — Show this message\n\n"
         "*Public Commands*\n"
@@ -719,6 +720,39 @@ async def cmd_reload(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 @admin_only
+async def cmd_testwelcome(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin command: fire the full welcome flow (group post + DM) on yourself.
+
+    Lets you verify the welcome system without needing a real member to join.
+    """
+    user = update.effective_user
+    chat = update.effective_chat
+
+    # Public-style welcome, posted in whatever chat the command was used in
+    group_msg = format_welcome_group(
+        username=user.username or "",
+        first_name=user.first_name or "friend",
+        community_name=config.COMMUNITY_NAME,
+    )
+    await ctx.bot.send_message(chat_id=chat.id, text=group_msg, parse_mode=ParseMode.MARKDOWN)
+
+    # Private welcome DM (same as a real join would trigger)
+    dm_msg = format_welcome_dm(
+        first_name=user.first_name or "friend",
+        community_name=config.COMMUNITY_NAME,
+    )
+    try:
+        await ctx.bot.send_message(chat_id=user.id, text=dm_msg, parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text("✅ Test welcome sent (group message + DM).")
+    except Exception as e:
+        await update.message.reply_text(
+            f"✅ Group welcome sent.\n⚠️ DM failed: `{e}`\n\n"
+            f"Open a DM with the bot and press Start, then try again.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+
+
+@admin_only
 async def cmd_testdm(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     if not ctx.args:
         await update.message.reply_text("Usage: /testdm <user_id>")
@@ -777,6 +811,7 @@ def build_community_bot() -> tuple[Application, AsyncIOScheduler]:
     app.add_handler(CommandHandler("resume", cmd_resume))
     app.add_handler(CommandHandler("welcome", cmd_welcome))
     app.add_handler(CommandHandler("reload", cmd_reload))
+    app.add_handler(CommandHandler("testwelcome", cmd_testwelcome))
     app.add_handler(CommandHandler("testdm", cmd_testdm))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
