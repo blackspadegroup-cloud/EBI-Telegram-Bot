@@ -131,8 +131,19 @@ RULES:
     return await _call_groq(prompt)
 
 
-async def answer_trading_question(question: str, context: str = "") -> Optional[str]:
-    """Answer a trading/community question from a member."""
+async def answer_trading_question(question: str, context: str = "", lang: Optional[str] = None) -> Optional[str]:
+    """Answer a trading/community question from a member.
+
+    lang: "en" or "zh" to force the reply language (the member's chosen language).
+          None → reply in the same language the member used.
+    """
+    if lang == "zh":
+        language_rule = "Respond ONLY in Simplified Chinese, regardless of the language of the question."
+    elif lang == "en":
+        language_rule = "Respond ONLY in English, regardless of the language of the question."
+    else:
+        language_rule = "Respond in the same language the member used. If mixed, respond in English."
+
     prompt = f"""You are a friendly AI assistant for "{config.COMMUNITY_NAME}", a trading community focused on Gold (XAUUSD) and Bitcoin.
 
 MEMBER QUESTION: {question}
@@ -147,7 +158,7 @@ RULES:
 6. If you don't know something, say so honestly — don't guess
 7. Use relevant emojis sparingly to keep it engaging
 
-Respond in the same language the member used. If mixed, respond in English."""
+{language_rule}"""
     return await _call_groq(prompt)
 
 

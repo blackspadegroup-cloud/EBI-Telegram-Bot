@@ -43,13 +43,13 @@ def format_scheduled_post(header: str, ai_content: str, post_type: str = "update
 
 
 def format_welcome_group(username: str, first_name: str, community_name: str) -> str:
-    """Public group welcome message for new members."""
+    """Public group welcome message for new members (bilingual — language unknown yet)."""
     display = f"@{username}" if username else first_name
     return (
-        f"🎉 Welcome *{display}* to *{community_name}*!\n\n"
-        f"We're glad to have you here. Feel free to ask questions, "
-        f"follow market updates, and enjoy the community. 🚀\n\n"
-        f"📌 Say hi and introduce yourself!"
+        f"🎉 Welcome *{display}* to *{community_name}*!\n"
+        f"Tap the button below to start the bot and pick your language. 🚀\n\n"
+        f"🎉 欢迎 *{display}* 加入 *{community_name}*！\n"
+        f"点击下方按钮启动机器人并选择语言。🚀"
     )
 
 

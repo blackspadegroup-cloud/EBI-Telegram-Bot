@@ -237,17 +237,8 @@ async def send_milestone_dms(bot) -> None:
         if get_state(flag_key, False):
             continue
 
-        message = (
-            f"Hey {first_name}! 🎉\n\n"
-            f"You've been part of *{config.COMMUNITY_NAME}* for a whole month — "
-            f"that's awesome! 🥳\n\n"
-            f"We hope you've been getting value from the daily market updates and "
-            f"community discussions. 📊\n\n"
-            f"*Quick question:* Have you had a chance to explore live trading yet? "
-            f"If you're curious about getting started or have any questions, "
-            f"just reply here — I'm happy to help guide you in the right direction. 💼\n\n"
-            f"_Keep learning, stay disciplined, and enjoy the journey!_ 🚀"
-        )
+        from services.i18n import t, get_lang
+        message = t("milestone_dm", get_lang(chat_id), name=first_name)
 
         try:
             await bot.send_message(
@@ -283,16 +274,8 @@ async def send_reengagement_dms(bot) -> None:
         if get_state(flag_key, False):
             continue
 
-        message = (
-            f"Hey {first_name}! 👋\n\n"
-            f"It's been a while since we've seen you around *{config.COMMUNITY_NAME}* — "
-            f"we miss you! 😊\n\n"
-            f"Gold and Bitcoin have been *very active* lately with some major economic "
-            f"events moving the markets. Come back and join the conversation! 📊\n\n"
-            f"If there's anything you'd like to learn or if you have any questions, "
-            f"I'm always here to help. Just send me a message anytime. 🙌\n\n"
-            f"_See you in the group!_ 🚀"
-        )
+        from services.i18n import t, get_lang
+        message = t("reengagement_dm", get_lang(chat_id), name=first_name)
 
         try:
             await bot.send_message(

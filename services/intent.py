@@ -147,6 +147,9 @@ def detect_intent(text: str) -> dict | None:
                         "label": label,
                         "points": points,
                         "send_alert": send_alert,
+                        # Language-agnostic CTA level; the bot localizes the actual text.
+                        "cta_level": "high" if points >= 3 else ("medium" if points == 2 else ""),
+                        # Kept for backward compatibility (English text).
                         "soft_cta": SOFT_CTA_HIGH if points >= 3 else (
                             SOFT_CTA_MEDIUM if points == 2 else ""
                         ),

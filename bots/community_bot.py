@@ -58,6 +58,8 @@ from database import (
     get_recent_intent_events,
     get_high_intent_members,
     get_new_members,
+    get_state,
+    set_state,
 )
 from services.ai import answer_trading_question
 from services.engagement import (
@@ -78,6 +80,11 @@ from services.formatter import (
 )
 from services.intent import detect_intent, format_intent_alert
 from services.onboarding import send_onboarding_step
+from services.i18n import (
+    t, get_lang, set_lang, lang_is_set,
+    language_kb, main_menu_kb, back_kb, how_kb, booking_kb,
+    start_trading_text,
+)
 from utils.logger import get_logger
 
 log = get_logger("community_bot")
@@ -232,18 +239,10 @@ async def handle_chat_member(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> 
     except Exception as e:
         log.error(f"Failed to send public welcome: {e}")
 
-    # Private DM (Day 0 of onboarding sequence)
-    dm_msg = format_welcome_dm(
-        first_name=user.first_name or "friend",
-        community_name=config.COMMUNITY_NAME,
-    )
+    # Private DM: language picker for first-timers, otherwise the main menu.
     try:
-        await ctx.bot.send_message(
-            chat_id=user.id,
-            text=dm_msg,
-            parse_mode=ParseMode.MARKDOWN,
-        )
-        log_message("community_bot", "welcome_dm", dm_msg, user.id)
+        await _send_start_experience(ctx.bot, user)
+        log_message("community_bot", "welcome_dm", "language_picker_or_menu", user.id)
     except Exception as e:
         log.info(f"Could not DM {user.first_name} (privacy settings): {e}")
 
@@ -278,6 +277,19 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None
     # ── 2. Ban check ──────────────────────────────────────────────────────────
     if is_user_banned(user.id):
         return
+
+    lang = get_lang(user.id)
+
+    # ── 2b. Lead capture (private only) ───────────────────────────────────────
+    # If the member tapped "Free Starter Guide" or "Book a 1-on-1", their next
+    # DM is treated as their name/contact and forwarded to the team.
+    if is_private:
+        capture_kind = get_state(f"awaiting_capture:{user.id}", None)
+        if capture_kind:
+            set_state(f"awaiting_capture:{user.id}", None)
+            await _capture_lead(ctx.bot, user, text, capture_kind)
+            await msg.reply_text(t("capture_thanks", lang))
+            return
 
     # ── 3. Rules enforcement (group only) ────────────────────────────────────
     if not is_private:
@@ -314,10 +326,7 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None
 
     # ── 6. Rate limit (group only) ────────────────────────────────────────────
     if not is_private and _is_rate_limited(user.id):
-        await msg.reply_text(
-            "⏳ You've asked a lot of questions recently! "
-            "Please wait a bit — I want to make sure everyone gets help. 🙏"
-        )
+        await msg.reply_text(t("rate_limited", lang))
         return
 
     # ── 7. Declined topics ────────────────────────────────────────────────────
@@ -328,11 +337,7 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None
 
     q_lower = question.lower()
     if any(phrase in q_lower for phrase in DECLINED_TOPICS):
-        await msg.reply_text(
-            "⚠️ I can't give specific trading signals or financial advice.\n\n"
-            "I'm here to educate — not to tell you when to buy or sell. "
-            "Always do your own research and manage your risk! 🙏"
-        )
+        await msg.reply_text(t("declined_topic", lang))
         return
 
     # ── 8. Intent detection ───────────────────────────────────────────────────
@@ -349,7 +354,11 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None
             intent_label=intent["label"],
             score=intent["points"],
         )
-        soft_cta = intent.get("soft_cta", "")
+        cta_level = intent.get("cta_level", "")
+        if cta_level == "high":
+            soft_cta = t("soft_cta_high", lang)
+        elif cta_level == "medium":
+            soft_cta = t("soft_cta_medium", lang)
 
         # Send alert to EBI Potential Client Update group for HIGH intent
         if intent["send_alert"] and config.POTENTIAL_CLIENT_GROUP_ID:
@@ -377,9 +386,10 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None
     await ctx.bot.send_chat_action(chat_id=msg.chat_id, action="typing")
     log.info(f"Q&A from {user.first_name} (ID={user.id}): {question[:80]}")
 
-    answer = await answer_trading_question(question, context=QA_SYSTEM_CONTEXT)
+    force_lang = lang if lang_is_set(user.id) else None
+    answer = await answer_trading_question(question, context=QA_SYSTEM_CONTEXT, lang=force_lang)
     if not answer:
-        answer = "I couldn't process your question right now. Please try again in a moment! 🙏"
+        answer = t("ai_fallback", lang)
 
     # Append soft CTA if applicable
     full_answer = answer + soft_cta if soft_cta else answer
@@ -469,44 +479,139 @@ async def handle_approval_callback(update: Update, ctx: ContextTypes.DEFAULT_TYP
 
 # ── Admin commands ────────────────────────────────────────────────────────────
 
+# ── Language picker + guided menu ─────────────────────────────────────────────
+
+async def _send_main_menu(bot, chat_id: int, lang: str, greeting: bool = False, name: str = "friend") -> None:
+    if greeting:
+        await bot.send_message(chat_id, t("welcome_dm", lang, name=name), parse_mode=ParseMode.MARKDOWN)
+    await bot.send_message(chat_id, t("menu_title", lang), reply_markup=main_menu_kb(lang))
+
+
+async def _send_start_experience(bot, user) -> None:
+    """Language picker for first-timers, otherwise the main menu."""
+    if lang_is_set(user.id):
+        await _send_main_menu(bot, user.id, get_lang(user.id), greeting=True, name=user.first_name or "friend")
+    else:
+        await bot.send_message(user.id, t("language_prompt"), reply_markup=language_kb())
+
+
+async def _notify_lead(bot, user, kind: str) -> None:
+    """Score a menu engagement and alert the potential-client group."""
+    label = "Free Starter Guide" if kind == "guide" else "1-on-1 Booking Request"
+    points = 2 if kind == "guide" else 3
+    new_score = add_intent_score(user.id, points)
+    log_intent_event(
+        telegram_id=user.id, username=user.username or "", first_name=user.first_name or "",
+        question=f"[menu] {label}", intent_label=label, score=points,
+    )
+    if config.POTENTIAL_CLIENT_GROUP_ID:
+        alert = format_intent_alert(
+            user_id=user.id, username=user.username or "", first_name=user.first_name or "",
+            question=label, label=label, total_score=new_score,
+        )
+        try:
+            await bot.send_message(chat_id=config.POTENTIAL_CLIENT_GROUP_ID, text=alert, parse_mode=ParseMode.MARKDOWN)
+        except Exception as e:
+            log.warning(f"Could not send lead alert: {e}")
+
+
+async def _capture_lead(bot, user, reply_text: str, kind: str) -> None:
+    """Forward a captured name/contact (after lead magnet or booking) to the team."""
+    label = "Starter Guide lead" if kind == "guide" else "1-on-1 booking"
+    display = f"@{user.username}" if user.username else (user.first_name or "Unknown")
+    profile = f"tg://user?id={user.id}"
+    text = (
+        f"📥 *New {label} — details captured*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"👤 [{display}]({profile})  (ID: `{user.id}`)\n"
+        f"📝 They replied: {reply_text[:300]}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"💡 Reach out to arrange their free 1-on-1."
+    )
+    if config.POTENTIAL_CLIENT_GROUP_ID:
+        try:
+            await bot.send_message(chat_id=config.POTENTIAL_CLIENT_GROUP_ID, text=text, parse_mode=ParseMode.MARKDOWN)
+        except Exception as e:
+            log.warning(f"Could not send captured lead: {e}")
+
+
+async def handle_lang_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle the 🇬🇧 / 🇨🇳 language-picker buttons (callback_data: setlang:{en|zh})."""
+    query = update.callback_query
+    await query.answer()
+    try:
+        _, lang = query.data.split(":")
+    except (ValueError, AttributeError):
+        return
+    user = query.from_user
+    set_lang(user.id, lang)
+    upsert_member(user.id, user.username or "", user.first_name or "", user.last_name or "")
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    await query.message.reply_text(t("language_changed", lang))
+    await _send_main_menu(ctx.bot, query.message.chat_id, lang, greeting=True, name=user.first_name or "friend")
+
+
+async def handle_menu_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle the guided-menu buttons (callback_data: menu:{action})."""
+    query = update.callback_query
+    await query.answer()
+    try:
+        _, action = query.data.split(":")
+    except (ValueError, AttributeError):
+        return
+    user = query.from_user
+    lang = get_lang(user.id)
+    bot = ctx.bot
+    chat_id = query.message.chat_id
+
+    if action == "home":
+        await bot.send_message(chat_id, t("menu_title", lang), reply_markup=main_menu_kb(lang))
+    elif action == "lang":
+        await bot.send_message(chat_id, t("language_prompt"), reply_markup=language_kb())
+    elif action == "about":
+        await bot.send_message(chat_id, t("about_ebi", lang), parse_mode=ParseMode.MARKDOWN, reply_markup=back_kb(lang))
+    elif action == "how":
+        await bot.send_message(chat_id, t("how_it_works", lang), parse_mode=ParseMode.MARKDOWN, reply_markup=how_kb(lang))
+    elif action == "ask":
+        await bot.send_message(chat_id, t("ask_hint", lang), reply_markup=back_kb(lang))
+    elif action == "guide":
+        await bot.send_message(chat_id, t("lead_magnet", lang), parse_mode=ParseMode.MARKDOWN, reply_markup=back_kb(lang))
+        set_state(f"awaiting_capture:{user.id}", "guide")
+        await _notify_lead(bot, user, "guide")
+    elif action == "book":
+        await bot.send_message(chat_id, t("book_call", lang), parse_mode=ParseMode.MARKDOWN, reply_markup=booking_kb(lang))
+        set_state(f"awaiting_capture:{user.id}", "book")
+        await _notify_lead(bot, user, "book")
+
+
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     upsert_member(user.id, user.username or "", user.first_name or "", user.last_name or "")
-    dm_msg = format_welcome_dm(
-        first_name=user.first_name or "friend",
-        community_name=config.COMMUNITY_NAME,
-    )
-    await update.message.reply_text(dm_msg, parse_mode=ParseMode.MARKDOWN)
+    if lang_is_set(user.id):
+        await _send_main_menu(
+            ctx.bot, update.effective_chat.id, get_lang(user.id),
+            greeting=True, name=user.first_name or "friend",
+        )
+    else:
+        await update.message.reply_text(t("language_prompt"), reply_markup=language_kb())
+
+
+async def cmd_language(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text(t("language_prompt"), reply_markup=language_kb())
+
+
+async def cmd_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    lang = get_lang(update.effective_user.id)
+    await update.message.reply_text(t("menu_title", lang), reply_markup=main_menu_kb(lang))
 
 
 async def cmd_start_trading(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     """Public command: step-by-step guide to getting started with live trading."""
     user = update.effective_user
-    message = (
-        f"🚀 *Getting Started with Live Trading*\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"Here's a simple path to get you from zero to your first trade:\n\n"
-        f"*Step 1 — Choose a Regulated Broker* 🏦\n"
-        f"Look for brokers regulated by FCA, ASIC, CySEC, or MAS. "
-        f"Regulation protects your funds. Ask our admins for trusted recommendations.\n\n"
-        f"*Step 2 — Open a Demo Account First* 🎮\n"
-        f"Practise with virtual money before risking real capital. "
-        f"Most brokers offer free demo accounts with no time limit.\n\n"
-        f"*Step 3 — Learn the Basics* 📚\n"
-        f"Understand: lot sizes, stop loss, take profit, pip value, and leverage. "
-        f"Ask me anything — I'm here to explain.\n\n"
-        f"*Step 4 — Fund Your Account* 💳\n"
-        f"Start small. Most brokers accept from $100–$500. "
-        f"Never deposit money you can't afford to lose.\n\n"
-        f"*Step 5 — Risk Management First* 🛡️\n"
-        f"Max 1–2% risk per trade. Set your stop loss BEFORE you enter. "
-        f"Protect your capital — it's your most important trading tool.\n\n"
-        f"*Step 6 — Get Support* 🤝\n"
-        f"Our admin team is here to guide you. DM us anytime — "
-        f"no pressure, no obligation, just honest help.\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"_⚠️ Trading involves risk. Never invest more than you can afford to lose._"
-    )
+    message = start_trading_text(get_lang(user.id))
 
     # Trigger a high-intent signal
     if config.POTENTIAL_CLIENT_GROUP_ID:
@@ -865,9 +970,13 @@ def build_community_bot() -> tuple[Application, AsyncIOScheduler]:
     # ── Handlers ──────────────────────────────────────────────────────────────
     app.add_handler(ChatMemberHandler(handle_chat_member, ChatMemberHandler.CHAT_MEMBER))
     app.add_handler(CallbackQueryHandler(handle_approval_callback, pattern=r"^(approve|reject):"))
+    app.add_handler(CallbackQueryHandler(handle_lang_callback, pattern=r"^setlang:"))
+    app.add_handler(CallbackQueryHandler(handle_menu_callback, pattern=r"^menu:"))
 
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("start_trading", cmd_start_trading))
+    app.add_handler(CommandHandler("language", cmd_language))
+    app.add_handler(CommandHandler("menu", cmd_menu))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("pipeline", cmd_pipeline))

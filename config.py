@@ -53,6 +53,9 @@ class Config:
 
     # ── Community ─────────────────────────────────────────────
     COMMUNITY_NAME: str = os.getenv("COMMUNITY_NAME", "Elite by Infinity")
+    # Optional booking link (Calendly, etc.) for the "Book a Free 1-on-1" button.
+    # If empty, the bot asks the member to reply with their name instead.
+    BOOKING_URL: str = os.getenv("BOOKING_URL", "")
 
     # ── Runtime state (mutable) ───────────────────────────────
     # Set to True via /pause command to stop posting
