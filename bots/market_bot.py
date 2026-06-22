@@ -11,7 +11,10 @@ Approval workflow:
   3. Bot sends the chosen version to MARKET_GROUP_ID (the community)
   4. If nobody picks within 30 minutes, Version 1 auto-posts
 
-Breaking news + economic calendar alerts go directly to the community group.
+Breaking news now requires approval too: each alert is sent to the management
+(approval) group with Approve / Discard buttons, and only posts to the community
+group once an admin approves. Economic-calendar alerts still post directly
+(they are time-sensitive countdowns).
 
 Admin commands: /testnews, /testmindset, /pause, /resume, /stats, /broadcast, /help
 """
@@ -331,11 +334,17 @@ async def handle_approval_callback(update: Update, ctx: ContextTypes.DEFAULT_TYP
         )
 
 
-# ── Breaking news (direct post — no approval needed) ─────────────────────────
+# ── Breaking news (approval required before posting to community) ─────────────
+# uid → alert text awaiting an Approve/Discard decision in the management group
+_pending_breaking: dict = {}
+
 
 async def check_breaking_news(bot: Bot) -> None:
     """
-    Scan for high-impact breaking news and post alerts directly to community.
+    Scan for high-impact breaking news and send each alert to the management
+    (approval) group with Approve / Discard buttons. Nothing reaches the
+    community group until an admin approves.
+
     Called every 15 minutes by the scheduler.
     """
     if config.BOT_PAUSED:
@@ -354,18 +363,75 @@ async def check_breaking_news(bot: Bot) -> None:
             if not alert:
                 continue
 
-            await bot.send_message(
-                chat_id=config.MARKET_GROUP_ID,
-                text=truncate(alert),
-                parse_mode=ParseMode.MARKDOWN,
-            )
+            # Mark as handled now so the same item isn't re-queued for approval
+            # every 15 minutes while it's pending a decision.
             mark_news_sent(title)
-            log_message("market_bot", "breaking", alert, config.MARKET_GROUP_ID)
-            log.info(f"Breaking news alert sent: {title[:60]}")
+
+            alert_text = truncate(alert)
+            uid = uuid.uuid4().hex[:8]
+            _pending_breaking[uid] = alert_text
+
+            keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton("✅ Approve & Post", callback_data=f"bnews:{uid}:approve"),
+                InlineKeyboardButton("❌ Discard", callback_data=f"bnews:{uid}:reject"),
+            ]])
+            await bot.send_message(
+                chat_id=config.APPROVAL_GROUP_ID,
+                text=f"🚨 *Breaking News — Approval Needed*\n\n{alert_text}",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=keyboard,
+            )
+            log.info(f"Breaking news queued for approval: {title[:60]}")
             await asyncio.sleep(2)
 
     except Exception as e:
         log.error(f"check_breaking_news failed: {e}", exc_info=True)
+
+
+async def handle_breaking_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle Approve / Discard for a breaking-news item from the approval group.
+
+    Callback data: bnews:{uid}:{approve|reject}
+    """
+    query = update.callback_query
+    await query.answer()
+
+    parts = (query.data or "").split(":")
+    if len(parts) != 3 or parts[0] != "bnews":
+        return
+
+    uid, choice = parts[1], parts[2]
+    content = _pending_breaking.pop(uid, None)
+
+    if content is None:
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+            await query.message.reply_text("ℹ️ This breaking-news item was already handled or expired.")
+        except Exception:
+            pass
+        return
+
+    admin = update.effective_user.first_name if update.effective_user else "Admin"
+
+    if choice == "approve":
+        try:
+            await ctx.bot.send_message(
+                chat_id=config.MARKET_GROUP_ID,
+                text=content,
+                parse_mode=ParseMode.MARKDOWN,
+            )
+            log_message("market_bot", "breaking", content, config.MARKET_GROUP_ID)
+            await query.edit_message_reply_markup(reply_markup=None)
+            await query.message.reply_text(f"✅ Breaking news posted to community by {admin}.")
+            log.info(f"Breaking news uid={uid} approved by {update.effective_user.id}")
+        except Exception as e:
+            _pending_breaking[uid] = content  # restore so it can be retried
+            await query.message.reply_text(f"❌ Failed to post: {e}")
+            log.error(f"Failed to post approved breaking news uid={uid}: {e}")
+    else:
+        await query.edit_message_reply_markup(reply_markup=None)
+        await query.message.reply_text(f"❌ Breaking news discarded by {admin}. Nothing was posted.")
+        log.info(f"Breaking news uid={uid} discarded by {update.effective_user.id}")
 
 
 async def check_economic_calendar(bot: Bot) -> None:
@@ -528,8 +594,9 @@ def build_market_bot() -> tuple[Application, AsyncIOScheduler]:
     app.add_handler(CommandHandler("broadcast", cmd_broadcast))
     app.add_handler(CommandHandler("share", cmd_share))
 
-    # Inline button handler for approval group
+    # Inline button handlers for the approval group
     app.add_handler(CallbackQueryHandler(handle_approval_callback, pattern=r"^approve:"))
+    app.add_handler(CallbackQueryHandler(handle_breaking_callback, pattern=r"^bnews:"))
 
     # Set up APScheduler
     tz = pytz.timezone(config.TIMEZONE)

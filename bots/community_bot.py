@@ -162,10 +162,24 @@ async def _notify_admins(bot, message: str) -> None:
 
 # ── Admin guard ───────────────────────────────────────────────────────────────
 
+def _is_anonymous_admin(update: Update) -> bool:
+    """True if the update comes from an anonymous group admin.
+
+    Anonymous admins post "on behalf of" the group, so the message carries
+    sender_chat == the group itself. Only real admins can post this way, so it
+    is safe to treat as authorized.
+    """
+    msg = update.effective_message
+    return bool(msg and msg.sender_chat and msg.sender_chat.id == msg.chat_id)
+
+
 def admin_only(func):
     async def wrapper(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        if update.effective_user.id not in config.ADMIN_IDS:
-            await update.message.reply_text("⛔ Not authorized.")
+        user = update.effective_user
+        is_listed = bool(user and user.id in config.ADMIN_IDS)
+        if not (is_listed or _is_anonymous_admin(update)):
+            if update.effective_message:
+                await update.effective_message.reply_text("⛔ Not authorized.")
             return
         return await func(update, ctx)
     wrapper.__name__ = func.__name__
@@ -762,11 +776,18 @@ async def cmd_testwelcome(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> Non
     """
     user = update.effective_user
     chat = update.effective_chat
+    msg = update.effective_message
+    is_anon = _is_anonymous_admin(update)
+
+    # Anonymous admins have no personal account behind the post, so use a sample
+    # identity for the preview and skip the DM step.
+    first_name = "New Member" if is_anon else (user.first_name or "friend")
+    username = "" if is_anon else (user.username or "")
 
     # Public-style welcome, posted in whatever chat the command was used in
     group_msg = format_welcome_group(
-        username=user.username or "",
-        first_name=user.first_name or "friend",
+        username=username,
+        first_name=first_name,
         community_name=config.COMMUNITY_NAME,
     )
     await ctx.bot.send_message(
@@ -776,6 +797,15 @@ async def cmd_testwelcome(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> Non
         reply_markup=_welcome_keyboard(ctx.bot.username),
     )
 
+    if is_anon:
+        await msg.reply_text(
+            "✅ Group welcome preview sent.\n"
+            "ℹ️ DM skipped — you're posting anonymously, so there's no personal "
+            "account to DM. Run /testwelcome in a private chat with me to preview "
+            "the DM too."
+        )
+        return
+
     # Private welcome DM (same as a real join would trigger)
     dm_msg = format_welcome_dm(
         first_name=user.first_name or "friend",
@@ -783,9 +813,9 @@ async def cmd_testwelcome(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> Non
     )
     try:
         await ctx.bot.send_message(chat_id=user.id, text=dm_msg, parse_mode=ParseMode.MARKDOWN)
-        await update.message.reply_text("✅ Test welcome sent (group message + DM).")
+        await msg.reply_text("✅ Test welcome sent (group message + DM).")
     except Exception as e:
-        await update.message.reply_text(
+        await msg.reply_text(
             f"✅ Group welcome sent.\n⚠️ DM failed: `{e}`\n\n"
             f"Open a DM with the bot and press Start, then try again.",
             parse_mode=ParseMode.MARKDOWN,

@@ -28,6 +28,11 @@ class Config:
     MANAGEMENT_GROUP_ID: int = int(os.getenv("MANAGEMENT_GROUP_ID", "0"))
     # "EBI Potential Client Update" — intent scoring alerts go here
     POTENTIAL_CLIENT_GROUP_ID: int = int(os.getenv("POTENTIAL_CLIENT_GROUP_ID", "0"))
+    # Approval group for the Market bot (market updates, mindset, breaking news).
+    # Defaults to the management group if APPROVAL_GROUP_ID is not set explicitly.
+    APPROVAL_GROUP_ID: int = int(
+        os.getenv("APPROVAL_GROUP_ID", os.getenv("MANAGEMENT_GROUP_ID", "0"))
+    )
 
     # ── Database ──────────────────────────────────────────────
     SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
