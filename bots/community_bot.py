@@ -136,6 +136,22 @@ def _detect_violation(text: str) -> Optional[str]:
     return None
 
 
+def _welcome_keyboard(bot_username: Optional[str]) -> Optional[InlineKeyboardMarkup]:
+    """Deep-link button so new members can start the bot and unblock DMs.
+
+    Telegram forbids bots from DMing users who have never started them. Tapping
+    this opens a private chat and fires /start, which sends the welcome DM.
+    """
+    if not bot_username:
+        return None
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(
+            "💬 Tap to activate your AI assistant",
+            url=f"https://t.me/{bot_username}?start=welcome",
+        )
+    ]])
+
+
 async def _notify_admins(bot, message: str) -> None:
     for admin_id in config.ADMIN_IDS:
         try:
@@ -196,6 +212,7 @@ async def handle_chat_member(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> 
             chat_id=update.chat_member.chat.id,
             text=group_msg,
             parse_mode=ParseMode.MARKDOWN,
+            reply_markup=_welcome_keyboard(ctx.bot.username),
         )
         log_message("community_bot", "welcome_public", group_msg, update.chat_member.chat.id)
     except Exception as e:
@@ -520,6 +537,7 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         "/reload — Reload admin IDs from env\n\n"
         "*Info & Testing*\n"
         "/stats — View member and message stats\n"
+        "/chatid — Show this chat's exact Telegram ID\n"
         "/testwelcome — Fire the welcome flow on yourself (group + DM)\n"
         "/testdm `<user_id>` — Send a test DM to a user\n"
         "/help — Show this message\n\n"
@@ -720,6 +738,23 @@ async def cmd_reload(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 @admin_only
+async def cmd_chatid(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """Reply with the current chat's exact Telegram ID and type.
+
+    Run this inside any group to get the correct chat_id (already in the
+    -100... supergroup form) for use in your Railway environment variables.
+    """
+    chat = update.effective_chat
+    await update.message.reply_text(
+        f"📍 *Chat info*\n"
+        f"ID: `{chat.id}`\n"
+        f"Type: `{chat.type}`\n"
+        f"Title: {chat.title or '—'}",
+        parse_mode=ParseMode.MARKDOWN,
+    )
+
+
+@admin_only
 async def cmd_testwelcome(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     """Admin command: fire the full welcome flow (group post + DM) on yourself.
 
@@ -734,7 +769,12 @@ async def cmd_testwelcome(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> Non
         first_name=user.first_name or "friend",
         community_name=config.COMMUNITY_NAME,
     )
-    await ctx.bot.send_message(chat_id=chat.id, text=group_msg, parse_mode=ParseMode.MARKDOWN)
+    await ctx.bot.send_message(
+        chat_id=chat.id,
+        text=group_msg,
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=_welcome_keyboard(ctx.bot.username),
+    )
 
     # Private welcome DM (same as a real join would trigger)
     dm_msg = format_welcome_dm(
@@ -811,6 +851,7 @@ def build_community_bot() -> tuple[Application, AsyncIOScheduler]:
     app.add_handler(CommandHandler("resume", cmd_resume))
     app.add_handler(CommandHandler("welcome", cmd_welcome))
     app.add_handler(CommandHandler("reload", cmd_reload))
+    app.add_handler(CommandHandler("chatid", cmd_chatid))
     app.add_handler(CommandHandler("testwelcome", cmd_testwelcome))
     app.add_handler(CommandHandler("testdm", cmd_testdm))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
