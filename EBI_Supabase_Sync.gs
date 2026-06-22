@@ -1,26 +1,32 @@
 // ============================================================
-// EBI — Supabase → Google Sheets Sync
-// Pulls data from Supabase every 15 minutes via time trigger.
+// EBI — Supabase → Google Sheets Sync  (v2)
+// Pulls live bot data from Supabase every 15 minutes.
 //
-// SETUP INSTRUCTIONS (one-time):
-//   1. Paste this entire script into your Apps Script editor
-//      (either the Member Tracker or a new standalone script)
-//   2. Click Save, then run setupTrigger() ONCE
-//   3. That's it — data syncs every 15 minutes automatically
+// SETUP (one-time):
+//   1. Open the Member Tracker sheet → Extensions → Apps Script
+//   2. Replace the whole script with this file, click Save
+//   3. Run setupTrigger() ONCE (authorise when prompted)
+//   4. Data now syncs every 15 minutes automatically
+//
+// Tabs written:
+//   • Member Tracker → "Members"
+//   • Dashboard      → "Intent Pipeline"   (full event feed, read-only)
+//   • Dashboard      → "Potential Clients"  (1 row per lead, manual columns kept)
 // ============================================================
 
-const SUPABASE_URL  = "https://gnxdbwsgfhttsbfiizrw.supabase.co";
-const SUPABASE_KEY  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdueGRid3NnZmh0dHNiZmlpenJ3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE3NzE3MDIsImV4cCI6MjA5NzM0NzcwMn0.zlhCO_v_F0AfHis5xoaPnGQYIoraarR1PqfxLirSr9c";
+// ── Project: "The Trading Terminal" (the project the bot actually writes to) ──
+const SUPABASE_URL = "https://jnyzkukhrwgiaqqtwfvv.supabase.co";
+// Service-role key (read-only use here). Internal script only — keep private.
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpueXprdWtocndnaWFxcXR3ZnZ2Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MTM3ODIzNiwiZXhwIjoyMDk2OTU0MjM2fQ.JM8dEmWBNfvKUQQDVHrOPR2je5yzz8hMnrjnb1-Di20";
 
-// Spreadsheet IDs from your Drive
-const MEMBER_TRACKER_ID  = "1VqSxg87nGjxxmbPVnJDjguKAP0Yd5q76FxSsOj0_cVo";
-const DASHBOARD_ID       = "1wsjSGOKC67mJf0fqxZU81cO6LptQ-Co_g8uQuIGz1pk";
+const MEMBER_TRACKER_ID = "1VqSxg87nGjxxmbPVnJDjguKAP0Yd5q76FxSsOj0_cVo";
+const DASHBOARD_ID      = "1wsjSGOKC67mJf0fqxZU81cO6LptQ-Co_g8uQuIGz1pk";
 
-// ── Header styles ─────────────────────────────────────────────
-const DARK_BG    = "#1A1A2E";
-const DARK_GOLD  = "#B8860B";
+const HOT_SCORE = 3;          // score at/above this = highlight as a hot lead
+const NAVY = "#1F2A44";
+const HOT  = "#FCE8E6";
 
-// ── Supabase REST helper ──────────────────────────────────────
+// ── REST helper ───────────────────────────────────────────────
 function supabaseFetch(table, params) {
   const query = params ? "?" + params : "";
   const res = UrlFetchApp.fetch(`${SUPABASE_URL}/rest/v1/${table}${query}`, {
@@ -38,155 +44,185 @@ function supabaseFetch(table, params) {
   return JSON.parse(res.getContentText());
 }
 
-// ── Main sync function (runs every 15 min) ────────────────────
+// ── Master ────────────────────────────────────────────────────
 function syncAll() {
-  syncMembers();
-  syncIntentPipeline();
+  const events = supabaseFetch("bot_intent_events", "order=created_at.asc&limit=5000");
+  syncMembers(events);
+  syncIntentPipeline(events);
+  syncPotentialClients(events);
   Logger.log("✅ EBI sync complete: " + new Date().toISOString());
 }
 
-// ── 1. Sync telegram_subscribers → Member Tracker ─────────────
-function syncMembers() {
-  const rows = supabaseFetch(
-    "telegram_subscribers",
-    "order=joined_at.desc&limit=1000"
-  );
+// Build a per-member aggregate from intent events.
+function aggregateLeads(events) {
+  const map = {};
+  events.forEach(e => {
+    const id = String(e.telegram_id || "");
+    if (!id) return;
+    if (!map[id]) map[id] = { id, first: e.created_at, last: e.created_at, score: 0,
+      count: 0, username: "", name: "", signal: "", question: "" };
+    const m = map[id];
+    m.score += (e.score_delta || 0);
+    m.count += 1;
+    m.last = e.created_at;                         // events are ascending → last wins
+    if (e.intent_label) m.signal = e.intent_label; // latest non-empty label
+    if (e.question) m.question = e.question;
+    if (e.username) m.username = e.username;
+    if (e.first_name) m.name = e.first_name;
+  });
+  return map;
+}
+
+// ── 1. Members tab (preserves manual columns L–O) ─────────────
+function syncMembers(events) {
+  const rows = supabaseFetch("telegram_subscribers", "order=joined_at.desc&limit=2000");
   if (!rows.length) { Logger.log("No members found"); return; }
 
-  const ss    = SpreadsheetApp.openById(MEMBER_TRACKER_ID);
-  const sheet = ss.getSheetByName("Members");
+  const leads = aggregateLeads(events || supabaseFetch("bot_intent_events", "limit=5000"));
 
-  // Clear existing data (keep header row)
-  const lastRow = sheet.getLastRow();
-  if (lastRow > 1) sheet.getRange(2, 1, lastRow - 1, 15).clearContent();
+  // onboarding step per member (bot_state key onboarding_step:{id})
+  const steps = {};
+  supabaseFetch("bot_state", "key=like.onboarding_step:*&limit=5000").forEach(s => {
+    const id = String(s.key).split(":")[1];
+    steps[id] = Number(s.value) || 0;
+  });
 
-  // Map Supabase columns → sheet columns
-  const data = rows.map(r => [
-    r.joined_at  ? new Date(r.joined_at)  : "",
-    r.chat_id    || "",
-    r.username   ? "@" + r.username : "",
-    r.first_name || "",
-    r.last_name  || "",
-    r.welcomed   ? "Yes" : "No",
-    r.onboarding_day1_sent ? "Yes" : "No",
-    r.onboarding_day3_sent ? "Yes" : "No",
-    r.onboarding_day5_sent ? "Yes" : "No",
-    "",   // Intent Score — filled from intent table
-    "",   // Top Intent Signal — filled from intent table
-    "",   // Follow-Up Status — manual
-    "",   // Converted? — manual
-    "",   // Notes — manual
-    "",   // Admin Assigned — manual
+  const sheet = SpreadsheetApp.openById(MEMBER_TRACKER_ID).getSheetByName("Members");
+  const manual = readManual(sheet, 2, [12, 13, 14, 15]);   // keyed by Telegram ID (col 2)
+
+  const data = rows.map(r => {
+    const id = String(r.chat_id || "");
+    const lead = leads[id] || {};
+    const step = steps[id] || 0;
+    const m = manual[id] || {};
+    return [
+      r.joined_at ? new Date(r.joined_at) : (r.first_seen ? new Date(r.first_seen) : ""),
+      r.chat_id || "",
+      r.username ? "@" + r.username : "",
+      r.first_name || "",
+      "",                              // last name (not collected)
+      "Yes",                           // DM Welcomed (welcomed on join)
+      step >= 1 ? "Yes" : "",
+      step >= 3 ? "Yes" : "",
+      step >= 5 ? "Yes" : "",
+      lead.score || 0,
+      lead.signal || "",
+      m[12] || "",                     // Follow-Up Status (manual, preserved)
+      m[13] || "",                     // Converted? (manual)
+      m[14] || "",                     // Notes (manual)
+      m[15] || "",                     // Admin Assigned (manual)
+    ];
+  });
+
+  writeBlock(sheet, data, 15);
+}
+
+// ── 2. Intent Pipeline tab (full event feed, newest first) ────
+function syncIntentPipeline(events) {
+  const evs = (events || supabaseFetch("bot_intent_events", "limit=5000"))
+    .slice().sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 1000);
+  if (!evs.length) { Logger.log("No intent events"); return; }
+
+  const sheet = SpreadsheetApp.openById(DASHBOARD_ID).getSheetByName("Intent Pipeline");
+  if (!sheet) { Logger.log("Intent Pipeline tab missing"); return; }
+
+  const data = evs.map(e => [
+    e.created_at ? new Date(e.created_at) : "",
+    e.telegram_id || "",
+    e.username ? "@" + e.username : "",
+    e.first_name || "",
+    e.intent_label || "",
+    e.question || "",
+    e.score_delta || 0,
+    "", "", "", "", "",   // Status / Admin / Follow-Up Date / Outcome / Notes (manual feed)
   ]);
+  writeBlock(sheet, data, 12);
+}
 
-  if (data.length) {
-    sheet.getRange(2, 1, data.length, 15).setValues(data);
-    // Format date column
-    sheet.getRange(2, 1, data.length, 1)
-      .setNumberFormat("dd/MM/yyyy HH:mm");
+// ── 3. Potential Clients tab (1 row per lead, manual cols kept) ─
+function syncPotentialClients(events) {
+  const map = aggregateLeads(events || supabaseFetch("bot_intent_events", "limit=5000"));
+  const leads = Object.keys(map).map(k => map[k]).sort((a, b) => b.score - a.score);
+
+  const ss = SpreadsheetApp.openById(DASHBOARD_ID);
+  let sheet = ss.getSheetByName("Potential Clients");
+  const header = ["First Seen", "Last Activity", "Telegram ID", "Username", "Name",
+    "Total Score", "Top Signal", "Latest Message", "# Signals", "DM Link",
+    "Status", "Admin", "Outcome", "Notes"];
+  if (!sheet) {
+    sheet = ss.insertSheet("Potential Clients", 0);
+    sheet.appendRow(header);
+    sheet.getRange(1, 1, 1, header.length).setFontWeight("bold")
+      .setFontColor("#FFFFFF").setBackground(NAVY);
+    sheet.setFrozenRows(1);
   }
 
-  // Overlay intent score + top signal from bot_intent_events
-  _overlayIntentScores(sheet, rows);
+  const manual = readManual(sheet, 3, [11, 12, 13, 14]);   // keyed by Telegram ID (col 3)
 
-  Logger.log(`Synced ${rows.length} members`);
-}
-
-// Helper: overlay the latest intent score per user onto Members tab
-function _overlayIntentScores(sheet, members) {
-  const events = supabaseFetch(
-    "bot_intent_events",
-    "order=created_at.desc&limit=2000"
-  );
-  if (!events.length) return;
-
-  // Build map: chat_id → { score, signal }
-  const scoreMap = {};
-  events.forEach(e => {
-    const id = String(e.chat_id || e.user_id || "");
-    if (!scoreMap[id]) {
-      scoreMap[id] = { score: e.intent_score || 0, signal: e.intent_type || e.intent || "" };
-    }
-    // accumulate total score per user
-    scoreMap[id].score += (e.intent_score || 0);
+  const data = leads.map(l => {
+    const m = manual[String(l.id)] || {};
+    const link = l.username ? "https://t.me/" + l.username : "tg://user?id=" + l.id;
+    return [
+      new Date(l.first), new Date(l.last), l.id, l.username ? "@" + l.username : "", l.name,
+      l.score, l.signal, l.question, l.count, link,
+      m[11] || "", m[12] || "", m[13] || "", m[14] || "",
+    ];
   });
 
-  // Write back into col J (score) and K (signal)
-  members.forEach((m, i) => {
-    const id = String(m.chat_id || "");
-    if (scoreMap[id]) {
-      const row = i + 2;
-      sheet.getRange(row, 10).setValue(scoreMap[id].score);
-      sheet.getRange(row, 11).setValue(scoreMap[id].signal);
-    }
-  });
-}
+  writeBlock(sheet, data, 14);
 
-// ── 2. Sync bot_intent_events → Dashboard Intent Pipeline tab ──
-function syncIntentPipeline() {
-  const events = supabaseFetch(
-    "bot_intent_events",
-    "order=created_at.desc&limit=500"
-  );
-  if (!events.length) { Logger.log("No intent events found"); return; }
-
-  const ss    = SpreadsheetApp.openById(DASHBOARD_ID);
-  const sheet = ss.getSheetByName("Intent Pipeline");
-  if (!sheet) { Logger.log("Intent Pipeline tab not found in Dashboard"); return; }
-
-  const lastRow = sheet.getLastRow();
-  if (lastRow > 1) sheet.getRange(2, 1, lastRow - 1, 12).clearContent();
-
-  const data = events.map(e => [
-    e.created_at ? new Date(e.created_at) : "",
-    e.chat_id    || e.user_id || "",
-    e.username   ? "@" + e.username : "",
-    e.first_name || "",
-    e.intent_type || e.intent || "",
-    e.message_text || e.message || "",
-    e.intent_score || 0,
-    "",   // Status — manual
-    "",   // Admin — manual
-    "",   // Follow-Up Date — manual
-    "",   // Outcome — manual
-    "",   // Notes — manual
-  ]);
-
+  // Highlight hot leads (score >= HOT_SCORE)
   if (data.length) {
-    sheet.getRange(2, 1, data.length, 12).setValues(data);
+    const scores = sheet.getRange(2, 6, data.length, 1).getValues();
+    for (let i = 0; i < data.length; i++) {
+      const bg = (scores[i][0] >= HOT_SCORE) ? HOT : "#FFFFFF";
+      sheet.getRange(i + 2, 1, 1, 14).setBackground(bg);
+    }
+    sheet.getRange(2, 1, data.length, 2).setNumberFormat("dd/MM/yyyy HH:mm");
+  }
+}
+
+// ── Helpers ───────────────────────────────────────────────────
+
+// Read manual columns into a map keyed by the value in column `keyCol`.
+function readManual(sheet, keyCol, cols) {
+  const out = {};
+  if (!sheet) return out;
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return out;
+  const width = sheet.getLastColumn();
+  const vals = sheet.getRange(2, 1, lastRow - 1, width).getValues();
+  vals.forEach(r => {
+    const key = String(r[keyCol - 1]);
+    if (!key) return;
+    const rec = {};
+    cols.forEach(c => rec[c] = r[c - 1]);
+    out[key] = rec;
+  });
+  return out;
+}
+
+// Clear old data rows (keep header) and write the new block.
+function writeBlock(sheet, data, width) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow > 1) sheet.getRange(2, 1, lastRow - 1, width).clearContent();
+  if (data.length) {
+    sheet.getRange(2, 1, data.length, width).setValues(data);
     sheet.getRange(2, 1, data.length, 1).setNumberFormat("dd/MM/yyyy HH:mm");
   }
-
-  Logger.log(`Synced ${events.length} intent events`);
 }
 
-// ── Setup: run this ONCE to create the 15-min trigger ─────────
+// ── Setup / test ──────────────────────────────────────────────
 function setupTrigger() {
-  // Remove any existing sync triggers first
   ScriptApp.getProjectTriggers().forEach(t => {
-    if (t.getHandlerFunction() === "syncAll") {
-      ScriptApp.deleteTrigger(t);
-    }
+    if (t.getHandlerFunction() === "syncAll") ScriptApp.deleteTrigger(t);
   });
-
-  ScriptApp.newTrigger("syncAll")
-    .timeBased()
-    .everyMinutes(15)
-    .create();
-
-  Logger.log("✅ Trigger created — syncAll will run every 15 minutes");
-  SpreadsheetApp.getUi
-    ? Logger.log("Trigger active.")
-    : null;
-
-  // Run immediately so team sees data right away
+  ScriptApp.newTrigger("syncAll").timeBased().everyMinutes(15).create();
+  Logger.log("✅ Trigger created — syncAll runs every 15 minutes");
   syncAll();
 }
 
-// ── Manual test: run this to check connection ──────────────────
 function testConnection() {
-  const rows = supabaseFetch("telegram_subscribers", "limit=3");
-  Logger.log("Sample members: " + JSON.stringify(rows, null, 2));
-  const events = supabaseFetch("bot_intent_events", "limit=3");
-  Logger.log("Sample intent events: " + JSON.stringify(events, null, 2));
+  Logger.log("Members sample: " + JSON.stringify(supabaseFetch("telegram_subscribers", "limit=2")));
+  Logger.log("Events sample: " + JSON.stringify(supabaseFetch("bot_intent_events", "limit=3")));
 }

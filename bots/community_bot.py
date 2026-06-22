@@ -518,6 +518,17 @@ async def _notify_lead(bot, user, kind: str) -> None:
 async def _capture_lead(bot, user, reply_text: str, kind: str) -> None:
     """Forward a captured name/contact (after lead magnet or booking) to the team."""
     label = "Starter Guide lead" if kind == "guide" else "1-on-1 booking"
+    # Persist the captured name/contact to the DB (score 0 = no double-count) so it
+    # appears in Supabase and flows into the Google Sheet pipeline.
+    try:
+        log_intent_event(
+            telegram_id=user.id, username=user.username or "", first_name=user.first_name or "",
+            question=f"Contact details: {reply_text[:200]}",
+            intent_label="Lead Details Captured", score=0,
+        )
+    except Exception as e:
+        log.warning(f"Could not log captured lead: {e}")
+
     display = f"@{user.username}" if user.username else (user.first_name or "Unknown")
     profile = f"tg://user?id={user.id}"
     text = (
