@@ -12,9 +12,9 @@ Approval workflow:
   4. If nobody picks within 30 minutes, Version 1 auto-posts
 
 Breaking news now requires approval too: each alert is sent to the management
-(approval) group with Approve / Discard buttons, and only posts to the community
-group once an admin approves. Economic-calendar alerts still post directly
-(they are time-sensitive countdowns).
+(approval) group with Approve / Discard buttons. If no admin responds within
+5 minutes, it auto-posts (breaking news is time-sensitive). Economic-calendar
+alerts still post directly (they are time-sensitive countdowns).
 
 Admin commands: /testnews, /testmindset, /pause, /resume, /stats, /broadcast, /help
 """
@@ -334,18 +334,23 @@ async def handle_approval_callback(update: Update, ctx: ContextTypes.DEFAULT_TYP
         )
 
 
-# ── Breaking news (approval required before posting to community) ─────────────
-# uid → alert text awaiting an Approve/Discard decision in the management group
+# ── Breaking news (approval required; auto-posts after 5 min if no reply) ─────
+# uid → { content, task, sent, approval_chat_id, approval_msg_id }
 _pending_breaking: dict = {}
+
+# If no admin approves/discards within this window, the alert auto-posts.
+# Breaking news is time-sensitive, so the window is short.
+BREAKING_AUTO_SEND_SECONDS = 300  # 5 minutes
 
 
 async def check_breaking_news(bot: Bot) -> None:
     """
     Scan for high-impact breaking news and send each alert to the management
-    (approval) group with Approve / Discard buttons. Nothing reaches the
-    community group until an admin approves.
+    (approval) group with Approve / Discard buttons. If no admin responds within
+    BREAKING_AUTO_SEND_SECONDS (5 min), the alert auto-posts to the community.
 
-    Called every 15 minutes by the scheduler.
+    Note: the 15-minute scheduler interval is how often we SCAN for news — it is
+    not the approval timeout. The approval timeout is the 5 minutes above.
     """
     if config.BOT_PAUSED:
         return
@@ -363,29 +368,77 @@ async def check_breaking_news(bot: Bot) -> None:
             if not alert:
                 continue
 
-            # Mark as handled now so the same item isn't re-queued for approval
-            # every 15 minutes while it's pending a decision.
+            # Mark as handled now so the same item isn't re-queued every scan.
             mark_news_sent(title)
 
             alert_text = truncate(alert)
             uid = uuid.uuid4().hex[:8]
-            _pending_breaking[uid] = alert_text
 
             keyboard = InlineKeyboardMarkup([[
                 InlineKeyboardButton("✅ Approve & Post", callback_data=f"bnews:{uid}:approve"),
                 InlineKeyboardButton("❌ Discard", callback_data=f"bnews:{uid}:reject"),
             ]])
-            await bot.send_message(
+            sent = await bot.send_message(
                 chat_id=config.APPROVAL_GROUP_ID,
-                text=f"🚨 *Breaking News — Approval Needed*\n\n{alert_text}",
+                text=(
+                    f"🚨 *Breaking News — Approval Needed*\n\n{alert_text}\n\n"
+                    f"_Auto-posts to the community in 5 minutes if no decision._"
+                ),
                 parse_mode=ParseMode.MARKDOWN,
                 reply_markup=keyboard,
             )
-            log.info(f"Breaking news queued for approval: {title[:60]}")
+
+            task = asyncio.create_task(_auto_send_breaking(uid, bot))
+            _pending_breaking[uid] = {
+                "content": alert_text,
+                "task": task,
+                "sent": False,
+                "approval_chat_id": sent.chat_id,
+                "approval_msg_id": sent.message_id,
+            }
+            log.info(f"Breaking news queued for approval (5-min auto-send): {title[:60]}")
             await asyncio.sleep(2)
 
     except Exception as e:
         log.error(f"check_breaking_news failed: {e}", exc_info=True)
+
+
+async def _auto_send_breaking(uid: str, bot: Bot) -> None:
+    """Auto-post a breaking-news item if no admin acts within the timeout."""
+    try:
+        await asyncio.sleep(BREAKING_AUTO_SEND_SECONDS)
+    except asyncio.CancelledError:
+        return  # an admin decided in time
+
+    pending = _pending_breaking.get(uid)
+    if not pending or pending["sent"]:
+        return
+
+    pending["sent"] = True
+    _pending_breaking.pop(uid, None)
+
+    try:
+        await bot.send_message(
+            chat_id=config.MARKET_GROUP_ID,
+            text=pending["content"],
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        log_message("market_bot", "breaking_auto", pending["content"], config.MARKET_GROUP_ID)
+        try:
+            await bot.edit_message_reply_markup(
+                chat_id=pending["approval_chat_id"],
+                message_id=pending["approval_msg_id"],
+                reply_markup=None,
+            )
+        except Exception:
+            pass
+        await bot.send_message(
+            chat_id=config.APPROVAL_GROUP_ID,
+            text="⏰ Auto-posted breaking news to the community (no decision within 5 minutes).",
+        )
+        log.info(f"Breaking news uid={uid} auto-sent after timeout")
+    except Exception as e:
+        log.error(f"Auto-send breaking news uid={uid} failed: {e}")
 
 
 async def handle_breaking_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -401,15 +454,21 @@ async def handle_breaking_callback(update: Update, ctx: ContextTypes.DEFAULT_TYP
         return
 
     uid, choice = parts[1], parts[2]
-    content = _pending_breaking.pop(uid, None)
+    pending = _pending_breaking.get(uid)
 
-    if content is None:
+    if not pending or pending["sent"]:
         try:
             await query.edit_message_reply_markup(reply_markup=None)
             await query.message.reply_text("ℹ️ This breaking-news item was already handled or expired.")
         except Exception:
             pass
         return
+
+    # Stop the 5-minute auto-send timer — an admin is deciding now.
+    pending["task"].cancel()
+    pending["sent"] = True
+    _pending_breaking.pop(uid, None)
+    content = pending["content"]
 
     admin = update.effective_user.first_name if update.effective_user else "Admin"
 
@@ -425,7 +484,6 @@ async def handle_breaking_callback(update: Update, ctx: ContextTypes.DEFAULT_TYP
             await query.message.reply_text(f"✅ Breaking news posted to community by {admin}.")
             log.info(f"Breaking news uid={uid} approved by {update.effective_user.id}")
         except Exception as e:
-            _pending_breaking[uid] = content  # restore so it can be retried
             await query.message.reply_text(f"❌ Failed to post: {e}")
             log.error(f"Failed to post approved breaking news uid={uid}: {e}")
     else:
