@@ -158,15 +158,20 @@ Legend: ⬜ Not started · 🟡 In progress · ✅ Done · 🔴 Urgent
 - ✅ `/reload` reports content / settings / intent-rule / FAQ counts for quick verification
 
 ### Stage 2 — Admin website
-- ⬜ Scaffold Next.js app + Supabase Auth (email login)
-- ⬜ Roles: Admin (Steve) vs Editor + Row-Level Security
+**Stack (decided):** standalone client-side React app (Vite) + Supabase Auth + supabase-js.
+Hosted free on Cloudflare Pages, served at **admin.elitesbyinfinity.com** (free subdomain).
+Separate from the live marketing site so it can never affect it. Cost: $0.
+- ✅ `bot_panel_users` roles table + `is_panel_admin()/is_panel_user()` helpers (Steve = sole admin)
+- ⬜ RLS policies on all `bot_` tables (panel users read; editors submit; admin approves)
+- ⬜ Scaffold Vite + React app + Supabase email login
 - ⬜ Editor UI: draft + submit (messages, FAQ, course)
 - ⬜ Admin UI: approval queue (approve / reject + note)
 - ⬜ Admin UI: settings (toggles, time pickers), intent rules
 - ⬜ Markdown safety: validate/escape content on save
 - ⬜ Submit/approve notifications (Telegram DM to Steve)
 - ⬜ Sent-message log view (read-only, both Analytic + Community bots)
-- ⬜ Deploy to `admin.<yourdomain>` (Vercel/Railway)
+- ⬜ Deploy to Cloudflare Pages + point `admin.elitesbyinfinity.com` DNS
+- ⬜ Enable Email auth in Supabase + add team editor emails to `bot_panel_users`
 
 ### Stage 3 — EBI Education Bot (30-day course)
 - ⬜ New bot via BotFather + token in Railway
