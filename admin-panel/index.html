@@ -73,9 +73,20 @@
       <p class="muted" style="margin-top:10px;font-size:11px">No password yet and prefer not to set one? <a href="#" id="magic">Email me a one-time link</a>.</p>
     </div>
 
+    <div id="signupBox" class="hidden">
+      <p class="muted" style="margin:18px 0 12px">First time here — set your password. Your email must already be authorised.</p>
+      <input id="suEmail" type="email" placeholder="you@example.com" autocomplete="email" />
+      <input id="suPwd" type="password" placeholder="New password (min 8 characters)" autocomplete="new-password" style="margin-top:10px" />
+      <input id="suPwd2" type="password" placeholder="Re-enter password" autocomplete="new-password" style="margin-top:10px" />
+      <button class="primary" style="width:100%;margin-top:12px" id="createPwd">Create password</button>
+      <p id="suMsg" class="muted" style="margin-top:12px;font-size:12px"></p>
+      <p class="muted" style="margin-top:8px;font-size:12px"><a href="#" id="backToLogin">← Back to sign in</a></p>
+    </div>
+
     <div id="recoveryBox" class="hidden">
       <p class="muted" style="margin:18px 0 12px">Set a new password for your account.</p>
       <input id="newPwd" type="password" placeholder="New password (min 8 characters)" autocomplete="new-password" />
+      <input id="newPwd2" type="password" placeholder="Re-enter new password" autocomplete="new-password" style="margin-top:10px" />
       <button class="primary" style="width:100%;margin-top:12px" id="setPwd">Update password</button>
       <p id="recMsg" class="muted" style="margin-top:12px;font-size:12px"></p>
     </div>
@@ -151,16 +162,30 @@ $('#signIn').onclick = async () => {
   boot();
 };
 
-// First-time users: type email + the password you want, then tap this.
-$('#firstTime').onclick = async (e) => {
+// First-time users: open the dedicated set-password form (email + password x2).
+$('#firstTime').onclick = (e) => {
   e.preventDefault();
-  const email = $('#email').value.trim().toLowerCase();
-  const password = $('#pwd').value;
-  if(!email || !password){ setMsg('Type your email and the password you want, then tap “Set password”.'); return; }
-  if(password.length < 8){ setMsg('Choose a password of at least 8 characters.'); return; }
-  const { error } = await sb.auth.signUp({ email, password, options:{ emailRedirectTo: REDIRECT } });
-  if(error){ setMsg('Could not set password: ' + error.message); return; }
-  setMsg('Password set. If a confirmation email arrives, click it once, then sign in. ✓');
+  $('#suEmail').value = $('#email').value.trim();
+  $('#loginBox').classList.add('hidden');
+  $('#signupBox').classList.remove('hidden');
+};
+$('#backToLogin').onclick = (e) => {
+  e.preventDefault();
+  $('#signupBox').classList.add('hidden');
+  $('#loginBox').classList.remove('hidden');
+};
+$('#createPwd').onclick = async () => {
+  const email = $('#suEmail').value.trim().toLowerCase();
+  const p1 = $('#suPwd').value, p2 = $('#suPwd2').value;
+  const m = $('#suMsg');
+  if(!email){ m.textContent = 'Enter your email.'; return; }
+  if(p1.length < 8){ m.textContent = 'Choose a password of at least 8 characters.'; return; }
+  if(p1 !== p2){ m.textContent = '⚠️ The two passwords do not match. Please re-enter them.'; return; }
+  $('#createPwd').disabled = true; m.textContent = 'Setting your password…';
+  const { error } = await sb.auth.signUp({ email, password: p1, options:{ emailRedirectTo: REDIRECT } });
+  $('#createPwd').disabled = false;
+  if(error){ m.textContent = 'Could not set password: ' + error.message; return; }
+  m.textContent = 'Password set. If a confirmation email arrives, click it once, then sign in. ✓';
 };
 
 $('#forgot').onclick = async (e) => {
@@ -181,7 +206,9 @@ $('#magic').onclick = async (e) => {
 
 $('#setPwd').onclick = async () => {
   const password = $('#newPwd').value;
+  const confirm = $('#newPwd2').value;
   if(!password || password.length < 8){ $('#recMsg').textContent = 'Choose a password of at least 8 characters.'; return; }
+  if(password !== confirm){ $('#recMsg').textContent = '⚠️ The two passwords do not match. Please re-enter them.'; return; }
   $('#setPwd').disabled = true;
   const { error } = await sb.auth.updateUser({ password });
   $('#setPwd').disabled = false;
