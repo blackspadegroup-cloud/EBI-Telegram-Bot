@@ -44,8 +44,18 @@ def lang_is_set(telegram_id: int) -> bool:
 # ── Translation helper ────────────────────────────────────────────────────────
 
 def t(key: str, lang: str = "en", **kwargs) -> str:
-    entry = STRINGS.get(key, {})
-    text = entry.get(lang) or entry.get("en") or ""
+    # 1) Prefer admin-approved content from the DB-backed store (Stage 1a).
+    # 2) Fall back to the in-code STRINGS table if the store has nothing
+    #    (DB empty, key missing, or DB unreachable) — the bot never breaks.
+    text = None
+    try:
+        from services import store
+        text = store.get_content(key, lang)
+    except Exception:
+        text = None
+    if not text:
+        entry = STRINGS.get(key, {})
+        text = entry.get(lang) or entry.get("en") or ""
     if kwargs:
         try:
             text = text.format(**kwargs)

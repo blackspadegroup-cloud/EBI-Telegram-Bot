@@ -67,6 +67,7 @@ from services.news import (
     format_headlines_for_ai,
 )
 from services.prices import get_gold_data
+from services import store
 from utils.logger import get_logger
 
 log = get_logger("market_bot")
@@ -101,7 +102,7 @@ async def post_for_approval(bot: Bot, content_type: str = "market") -> None:
 
     content_type: "market" (Mon–Fri updates) or "mindset" (Sat–Sun posts)
     """
-    if config.BOT_PAUSED:
+    if store.is_paused():
         log.info("Bot is paused — skipping approval request")
         return
 
@@ -368,7 +369,7 @@ async def run_breaking_digest(bot: Bot) -> None:
     Quiet window: if no significant news is found, nothing goes to the
     community — a short note is sent to the management group instead.
     """
-    if config.BOT_PAUSED:
+    if store.is_paused():
         log.info("Bot is paused — skipping breaking-news digest")
         return
 
@@ -557,7 +558,7 @@ async def check_economic_calendar(bot: Bot) -> None:
     Check for upcoming high-impact economic events and alert 30 min before.
     Called every 30 minutes by the scheduler.
     """
-    if config.BOT_PAUSED:
+    if store.is_paused():
         return
 
     try:
@@ -634,6 +635,7 @@ async def cmd_testmindset(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> Non
 async def cmd_pause(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     """Pause all automatic posts."""
     config.BOT_PAUSED = True
+    store.set_setting("paused", True, actor=str(update.effective_user.id))
     await update.message.reply_text("⏸️ Market bot paused. Use /resume to restart.")
     log.info(f"Bot paused by admin {update.effective_user.id}")
 
@@ -642,6 +644,7 @@ async def cmd_pause(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 async def cmd_resume(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     """Resume all automatic posts."""
     config.BOT_PAUSED = False
+    store.set_setting("paused", False, actor=str(update.effective_user.id))
     await update.message.reply_text("▶️ Market bot resumed.")
     log.info(f"Bot resumed by admin {update.effective_user.id}")
 

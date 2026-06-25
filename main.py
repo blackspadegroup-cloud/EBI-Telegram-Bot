@@ -45,6 +45,14 @@ async def run_all() -> None:
     log.info(f"Admin IDs: {config.ADMIN_IDS}")
     log.info("=" * 50)
 
+    # Load DB-backed settings + content into the in-memory store (Stage 1a).
+    # Seeds bot_content_versions from the in-code STRINGS table on first run,
+    # then loads approved content + settings. Safe: on any DB error the bots
+    # fall back to the hardcoded defaults.
+    from services import store
+    from services.i18n import STRINGS
+    await store.initial_load(STRINGS)
+
     # Build both bots (both return (Application, AsyncIOScheduler))
     market_app, market_scheduler = build_market_bot()
     community_app, community_scheduler = build_community_bot()

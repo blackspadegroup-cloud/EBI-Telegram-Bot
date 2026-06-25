@@ -80,6 +80,7 @@ from services.formatter import (
 )
 from services.intent import detect_intent, format_intent_alert
 from services.onboarding import send_onboarding_step
+from services import store
 from services.i18n import (
     t, get_lang, set_lang, lang_is_set,
     language_kb, main_menu_kb, back_kb, how_kb, booking_kb,
@@ -268,7 +269,7 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None
     msg = update.message
     user = msg.from_user
 
-    if user.is_bot or config.BOT_PAUSED:
+    if user.is_bot or store.is_paused():
         return
 
     text = msg.text
@@ -835,12 +836,14 @@ async def cmd_unban(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 @admin_only
 async def cmd_pause(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     config.BOT_PAUSED = True
+    store.set_setting("paused", True, actor=str(update.effective_user.id))
     await update.message.reply_text("⏸️ Community bot paused — AI Q&A disabled.")
 
 
 @admin_only
 async def cmd_resume(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     config.BOT_PAUSED = False
+    store.set_setting("paused", False, actor=str(update.effective_user.id))
     await update.message.reply_text("▶️ Community bot resumed — AI Q&A enabled.")
 
 
@@ -861,8 +864,11 @@ async def cmd_reload(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     raw = os.getenv("ADMIN_IDS", "")
     new_ids = [int(x.strip()) for x in raw.split(",") if x.strip()]
     config.ADMIN_IDS = new_ids
+    # Also refresh DB-backed content + settings from Supabase.
+    await store.refresh()
     await update.message.reply_text(
-        f"🔄 Config reloaded.\nAdmin IDs: `{new_ids}`",
+        f"🔄 Reloaded.\nAdmin IDs: `{new_ids}`\n"
+        f"Content rows: `{len(store._content_cache)}` · Settings: `{len(store._settings_cache)}`",
         parse_mode=ParseMode.MARKDOWN,
     )
 
@@ -1059,6 +1065,13 @@ def build_community_bot() -> tuple[Application, AsyncIOScheduler]:
     scheduler.add_job(
         send_reengagement_dms, "cron", day_of_week="sun", hour=11, minute=0,
         args=[bot], id="reengagement_dms",
+    )
+
+    # DB-backed content/settings refresh — every 60s (single job; cache is shared
+    # across both bots in this process). Admin edits in Supabase go live within a minute.
+    scheduler.add_job(
+        store.refresh, "interval", seconds=60, id="store_refresh",
+        replace_existing=True,
     )
 
     log.info("Community bot configured with all scheduled jobs.")
