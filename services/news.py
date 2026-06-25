@@ -1,13 +1,16 @@
 """
-services/news.py – Fetch market news from free sources.
+services/news.py – Fetch Gold & US-macro market news from free sources.
+
+Focus: XAUUSD (Gold) and the US economic backdrop that drives it
+(Fed policy, inflation, jobs, USD, yields, geopolitics). Bitcoin / crypto
+coverage has been intentionally removed from this bot.
 
 Sources (all free, no paid tier needed):
-  1. RSS feeds: Reuters, CoinDesk, CoinTelegraph, MarketWatch
+  1. RSS feeds: MarketWatch, Investing.com (precious metals), Kitco,
+     FXStreet, plus Google News RSS queries for Gold + US macro
   2. NewsAPI (100 req/day free) – optional, improves quality
-  3. CryptoPanic (free tier) – crypto news with sentiment
-  4. Google News RSS – no API key
 
-Breaking news detection: checks for high-impact keywords.
+Breaking news detection: checks for high-impact US-macro / Gold keywords.
 """
 
 import asyncio
@@ -26,50 +29,55 @@ log = get_logger("news_service")
 # ── RSS Feed sources ──────────────────────────────────────────────────────────
 
 GOLD_RSS_FEEDS = [
+    # Core market / precious-metals feeds
     "https://feeds.marketwatch.com/marketwatch/topstories/",
     "https://www.investing.com/rss/market_overview_investing_precious_metals.rss",
+    "https://www.investing.com/rss/news_25.rss",          # Investing.com economic indicators
     "https://www.kitco.com/rss/news_rss.cfm",
+    "https://www.fxstreet.com/rss/news",                  # FXStreet – forex & gold
+    # Google News RSS queries (no API key) — Gold + US macro focused
+    "https://news.google.com/rss/search?q=gold+price+XAUUSD&hl=en-US&gl=US&ceid=US:en",
+    "https://news.google.com/rss/search?q=Federal+Reserve+OR+%22interest+rate%22+OR+inflation+US&hl=en-US&gl=US&ceid=US:en",
+    "https://news.google.com/rss/search?q=US+economy+OR+jobs+report+OR+CPI&hl=en-US&gl=US&ceid=US:en",
 ]
 
-CRYPTO_RSS_FEEDS = [
-    "https://www.coindesk.com/arc/outboundfeeds/rss/?outputType=xml",
-    "https://cointelegraph.com/rss",
-    "https://decrypt.co/feed",
-]
-
-# Keywords that indicate HIGH IMPACT breaking news
+# Keywords that indicate HIGH IMPACT breaking news (Gold / US-macro only)
 BREAKING_NEWS_KEYWORDS = [
-    # US Macro
-    "CPI", "consumer price index", "inflation",
-    "FOMC", "federal reserve", "fed rate", "interest rate decision",
-    "NFP", "nonfarm payroll", "jobs report",
-    "GDP", "gross domestic product",
-    "PPI", "producer price",
-    "unemployment",
-    # Geopolitical
-    "war", "conflict", "sanctions", "nuclear",
-    "recession", "banking crisis", "bank collapse",
-    # Crypto specific
-    "ETF approval", "ETF rejected", "SEC", "bitcoin ETF",
-    "exchange hack", "exchange collapse", "USDT", "stablecoin",
-    "whale", "liquidation",
-    # Central banks
-    "powell", "yellen", "ECB", "bank of england", "BOJ",
-    "rate cut", "rate hike", "quantitative easing", "QE",
+    # US inflation & growth data
+    "CPI", "core cpi", "consumer price index", "inflation",
+    "PCE", "core pce", "PPI", "producer price",
+    "GDP", "gross domestic product", "retail sales", "ISM",
+    "consumer confidence", "consumer sentiment",
+    # Fed / rates
+    "FOMC", "federal reserve", "fed minutes", "fed rate",
+    "interest rate decision", "rate cut", "rate hike",
+    "dot plot", "quantitative easing", "QE", "quantitative tightening",
+    # Jobs
+    "NFP", "nonfarm payroll", "non-farm payroll", "jobs report",
+    "unemployment", "jobless claims", "initial jobless claims", "ADP",
+    # USD / yields / fiscal
+    "dollar index", "DXY", "treasury", "treasury yield", "bond yield",
+    "tariff", "tariffs", "debt ceiling", "government shutdown", "downgrade",
+    # Geopolitical / safe-haven drivers
+    "war", "conflict", "sanctions", "nuclear", "ceasefire",
+    "recession", "banking crisis", "bank collapse", "safe haven",
+    # Central bankers / officials
+    "powell", "yellen", "bessent", "ECB", "bank of england", "BOJ",
 ]
 
-# Keywords indicating gold relevance
+# Keywords indicating gold / US-macro relevance
 GOLD_KEYWORDS = [
-    "gold", "xauusd", "xau", "bullion", "precious metal",
-    "dollar index", "DXY", "treasury", "yield",
-    "fed", "fomc", "inflation", "cpi",
-]
-
-# Keywords indicating BTC relevance
-BTC_KEYWORDS = [
-    "bitcoin", "btc", "crypto", "ethereum", "blockchain",
-    "altcoin", "defi", "etf", "coinbase", "binance",
-    "whale", "halving", "mining",
+    # Gold itself
+    "gold", "xauusd", "xau", "bullion", "precious metal", "safe haven",
+    # USD / rates / yields
+    "dollar index", "dxy", "us dollar", "treasury", "yield", "real yield",
+    # Fed & policy
+    "fed", "fomc", "federal reserve", "powell", "rate cut", "rate hike",
+    # US data
+    "inflation", "cpi", "pce", "ppi", "nonfarm", "payroll", "jobless claims",
+    "unemployment", "gdp", "retail sales", "ism", "recession",
+    # Macro / geopolitics
+    "tariff", "geopolitical", "war", "sanctions", "central bank",
 ]
 
 
@@ -102,66 +110,19 @@ async def fetch_gold_news(hours_back: int = 6) -> list[dict]:
     return unique[:8]  # Top 8
 
 
-async def fetch_btc_news(hours_back: int = 6) -> list[dict]:
-    """Fetch recent Bitcoin/crypto news headlines."""
-    articles = []
-
-    # RSS feeds
-    rss_articles = await _fetch_rss_feeds(CRYPTO_RSS_FEEDS, BTC_KEYWORDS, hours_back)
-    articles.extend(rss_articles)
-
-    # CryptoPanic (if key configured)
-    if config.CRYPTOPANIC_API_KEY:
-        cp_articles = await _fetch_cryptopanic(hours_back)
-        articles.extend(cp_articles)
-
-    # NewsAPI crypto
-    if config.NEWS_API_KEY:
-        newsapi_articles = await _fetch_newsapi(
-            query="bitcoin cryptocurrency BTC ETF",
-            hours_back=hours_back
-        )
-        articles.extend(newsapi_articles)
-
-    # Deduplicate
-    seen = set()
-    unique = []
-    for a in articles:
-        key = a["title"][:60].lower()
-        if key not in seen:
-            seen.add(key)
-            unique.append(a)
-
-    log.info(f"BTC news: {len(unique)} articles fetched")
-    return unique[:8]
-
-
 async def check_for_breaking_news(hours_back: int = 1) -> list[dict]:
     """
-    Scan recent news for high-impact breaking events.
-    Returns list of {title, url, asset} where asset is 'gold', 'bitcoin', or 'both'.
+    Scan recent Gold / US-macro news for high-impact breaking events.
+    Returns list of {title, url, asset} — asset is always 'gold' (this bot
+    is Gold-only; Bitcoin/crypto coverage has been removed).
     """
-    all_feeds = GOLD_RSS_FEEDS + CRYPTO_RSS_FEEDS
-    articles = await _fetch_rss_feeds(all_feeds, BREAKING_NEWS_KEYWORDS, hours_back)
+    articles = await _fetch_rss_feeds(GOLD_RSS_FEEDS, BREAKING_NEWS_KEYWORDS, hours_back)
 
     breaking = []
     for article in articles:
-        text = f"{article['title']} {article.get('summary', '')}".lower()
-        is_gold = any(kw.lower() in text for kw in GOLD_KEYWORDS)
-        is_btc = any(kw.lower() in text for kw in BTC_KEYWORDS)
+        breaking.append({**article, "asset": "gold"})
 
-        if is_gold and is_btc:
-            asset = "both"
-        elif is_gold:
-            asset = "gold"
-        elif is_btc:
-            asset = "bitcoin"
-        else:
-            asset = "both"  # General macro affects both
-
-        breaking.append({**article, "asset": asset})
-
-    log.info(f"Breaking news scan: {len(breaking)} high-impact items")
+    log.info(f"Breaking news scan: {len(breaking)} high-impact Gold/macro items")
     return breaking
 
 
@@ -240,35 +201,6 @@ async def _fetch_newsapi(query: str, hours_back: int) -> list[dict]:
                 return articles
     except Exception as e:
         log.warning(f"NewsAPI fetch failed: {e}")
-        return []
-
-
-async def _fetch_cryptopanic(hours_back: int) -> list[dict]:
-    """Fetch from CryptoPanic free API."""
-    url = (
-        f"https://cryptopanic.com/api/v1/posts/"
-        f"?auth_token={config.CRYPTOPANIC_API_KEY}"
-        f"&currencies=BTC&filter=important&public=true"
-    )
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                if resp.status != 200:
-                    return []
-                data = await resp.json()
-                cutoff = datetime.now(timezone.utc) - timedelta(hours=hours_back)
-                articles = []
-                for item in data.get("results", []):
-                    title = item.get("title", "")
-                    articles.append({
-                        "title": title,
-                        "summary": "",
-                        "url": item.get("url", ""),
-                        "source": "CryptoPanic",
-                    })
-                return articles
-    except Exception as e:
-        log.warning(f"CryptoPanic fetch failed: {e}")
         return []
 
 

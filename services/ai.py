@@ -45,12 +45,13 @@ async def generate_market_update(
             "Do NOT discuss news or macro. Pure price-action lens."
         ),
         "fundamental": (
-            "PERSPECTIVE: Fundamental & News-Driven\n"
-            "Focus ONLY on the news headlines and macro drivers provided:\n"
-            "- What specific news or event is moving the market today\n"
-            "- The macro backdrop (USD strength, inflation, Fed policy, risk appetite)\n"
-            "- Why this fundamental factor matters for Gold right now\n"
-            "Reference the actual headlines given. No generic commentary."
+            "PERSPECTIVE: Fundamental & US-Macro-Driven\n"
+            "Focus ONLY on US economic data and macro drivers from the headlines provided:\n"
+            "- The key US data or Fed event moving Gold today (CPI, PCE, NFP, jobless claims, GDP, retail sales, FOMC, Fed speakers)\n"
+            "- The macro backdrop: USD strength (DXY), Treasury yields, inflation path, Fed rate expectations, risk appetite\n"
+            "- Any geopolitical / safe-haven flows supporting or pressuring Gold\n"
+            "- Why this specific US fundamental factor matters for Gold right now\n"
+            "Reference the actual headlines given. No generic commentary. Gold only — never mention Bitcoin or crypto."
         ),
         "sentiment": (
             "PERSPECTIVE: Market Sentiment & Trader Psychology\n"
@@ -104,31 +105,83 @@ RULES:
     return await _call_groq(prompt)
 
 
-async def generate_breaking_news_alert(headline: str, asset: str) -> Optional[str]:
-    """Summarize a breaking news headline into a short bilingual alert."""
-    asset_emoji = {"gold": "🥇", "bitcoin": "₿", "both": "🥇₿"}.get(asset, "📰")
-    prompt = f"""You are a market news analyst. A breaking news headline just dropped that affects {asset}.
+async def generate_breaking_news_alert(headline: str, asset: str = "gold") -> Optional[str]:
+    """Summarize a breaking Gold / US-macro headline into a short bilingual alert.
+
+    This bot is Gold-only, so `asset` is effectively always "gold"; the
+    parameter is kept for backward compatibility.
+    """
+    prompt = f"""You are a market news analyst for a Gold (XAUUSD) trading community.
+A breaking US-macro / Gold headline just dropped.
 
 HEADLINE: {headline}
 
-Write a SHORT bilingual alert for a trading Telegram group.
+Write a SHORT bilingual alert for a trading Telegram group, focused on how this
+affects GOLD and the US Dollar. Do NOT mention Bitcoin or crypto.
 
 FORMAT EXACTLY:
-🚨 *Breaking Market News* {asset_emoji}
+🚨 *Breaking Market News* 🥇
 
-[2 sentences English: what happened + likely market impact]
+[2 sentences English: what happened + likely impact on Gold / USD]
 
-🚨 *突发市场新闻* {asset_emoji}
+🚨 *突发市场新闻* 🥇
 
 [Same in Chinese, 2 sentences]
 
 ⚠️ _Stay cautious. Manage your risk._
 
 RULES:
+- Gold / US-macro only — never mention Bitcoin, crypto, or other assets
 - Be factual, no speculation beyond direct market impact
 - Do not give trading advice or profit guarantees
 - Keep it under 100 words total"""
     return await _call_groq(prompt)
+
+
+async def select_top_breaking_news(headlines: list[str], top_n: int = 3) -> list[int]:
+    """Ask the AI to rank the most market-moving Gold / US-macro headlines.
+
+    Returns a list of 0-based indices into `headlines`, most important first,
+    length <= top_n. Falls back to the first `top_n` items if the AI response
+    can't be parsed.
+    """
+    import re
+
+    if not headlines:
+        return []
+    if len(headlines) <= top_n:
+        return list(range(len(headlines)))
+
+    numbered = "\n".join(f"{i + 1}. {h}" for i, h in enumerate(headlines))
+    prompt = f"""You are the senior market analyst for a Gold (XAUUSD) trading community.
+From the numbered list of recent Gold / US-macro headlines below, choose the {top_n} MOST
+market-moving for GOLD and the US Dollar right now. Prioritise: Fed/rate decisions, US
+inflation (CPI/PCE/PPI), jobs data (NFP/jobless claims), GDP, major geopolitical/safe-haven
+events, and big USD/Treasury-yield moves. Ignore minor or off-topic items.
+
+HEADLINES:
+{numbered}
+
+Respond with ONLY the numbers of your top {top_n} picks, most important FIRST, comma-separated.
+Example: 4, 1, 7
+No other text, no explanation."""
+
+    response = await _call_groq(prompt)
+    if not response:
+        return list(range(min(top_n, len(headlines))))
+
+    # Parse integers from the response, keep valid 1-based picks, de-dup, preserve order.
+    picks: list[int] = []
+    for num in re.findall(r"\d+", response):
+        idx = int(num) - 1
+        if 0 <= idx < len(headlines) and idx not in picks:
+            picks.append(idx)
+        if len(picks) >= top_n:
+            break
+
+    if not picks:
+        return list(range(min(top_n, len(headlines))))
+    return picks
 
 
 async def answer_trading_question(question: str, context: str = "", lang: Optional[str] = None) -> Optional[str]:
@@ -195,7 +248,7 @@ async def generate_mindset_content(topic: str = "discipline") -> Optional[str]:
 
     angle = topic_instructions.get(topic, topic_instructions["discipline"])
 
-    prompt = f"""You are a professional trading coach for Elite by Infinity, a Gold and Bitcoin trading community.
+    prompt = f"""You are a professional trading coach for Elite by Infinity, a Gold (XAUUSD) trading community.
 
 Write a weekend mindset post using the specific topic below. This is one of 3 versions — make it clearly focused on its own angle, not a generic mix.
 
@@ -236,16 +289,16 @@ FORMAT EXACTLY:
 📌 {event.get('name', 'Economic Event')} ({event.get('country', 'US')})
 ⏰ Releasing in ~{event.get('minutes_until', 30)} minutes
 
-[1 sentence: what this event measures and why it matters for Gold/BTC]
+[1 sentence: what this event measures and why it matters for Gold and the US Dollar]
 
 🚨 *重要经济事件* 🗓️
 
 [Same info in Chinese]
 
-⚠️ _Expect volatility on Gold and Bitcoin. Manage risk carefully._
-⚠️ _黄金和比特币可能出现波动，请谨慎管理风险。_
+⚠️ _Expect volatility on Gold. Manage risk carefully._
+⚠️ _黄金可能出现波动，请谨慎管理风险。_
 
-Keep it under 80 words. Be factual and professional."""
+Keep it under 80 words. Be factual and professional. Focus on Gold/USD only — do not mention Bitcoin or crypto."""
     return await _call_groq(prompt)
 
 

@@ -11,12 +11,16 @@ Approval workflow:
   3. Bot sends the chosen version to MARKET_GROUP_ID (the community)
   4. If nobody picks within 30 minutes, Version 1 auto-posts
 
-Breaking news now requires approval too: each alert is sent to the management
-(approval) group with Approve / Discard buttons. If no admin responds within
-5 minutes, it auto-posts (breaking news is time-sensitive). Economic-calendar
-alerts still post directly (they are time-sensitive countdowns).
+Breaking news runs as a digest 6×/day (daytime SGT: 08, 11, 14, 17, 20, 23):
+the AI ranks the 3 most market-moving Gold / US-macro stories and posts all 3
+to the management (approval) group. An admin picks 1 of 3 to broadcast; if no
+one decides within 10 minutes, the AI's #1 story auto-posts. Quiet windows post
+nothing to the community (a short note goes to management). This caps breaking
+posts at 6/day. Economic-calendar alerts still post directly (time-sensitive
+countdowns).
 
-Admin commands: /testnews, /testmindset, /pause, /resume, /stats, /broadcast, /help
+Admin commands: /testnews, /testbreaking, /testmindset, /pause, /resume,
+/stats, /broadcast, /share, /help
 """
 
 import asyncio
@@ -48,6 +52,7 @@ from services.ai import (
     generate_economic_event_alert,
     generate_market_update,
     generate_mindset_content,
+    select_top_breaking_news,
 )
 from services.calendar import get_events_to_alert
 from services.formatter import (
@@ -334,77 +339,128 @@ async def handle_approval_callback(update: Update, ctx: ContextTypes.DEFAULT_TYP
         )
 
 
-# ── Breaking news (approval required; auto-posts after 5 min if no reply) ─────
-# uid → { content, task, sent, approval_chat_id, approval_msg_id }
+# ── Breaking-news digest (runs 6×/day; admin picks 1 of 3; auto-posts #1) ─────
+# uid → { versions: [...], task, sent, approval_chat_id, approval_msg_id }
 _pending_breaking: dict = {}
 
-# If no admin approves/discards within this window, the alert auto-posts.
-# Breaking news is time-sensitive, so the window is short.
-BREAKING_AUTO_SEND_SECONDS = 300  # 5 minutes
+# If no admin picks within this window, the AI's #1 story auto-posts.
+BREAKING_AUTO_SEND_SECONDS = 600  # 10 minutes
+
+# How many candidate options to present (admin picks 1).
+BREAKING_OPTIONS = 3
+
+# How far back each digest scans for news (covers the gap between runs + margin).
+BREAKING_LOOKBACK_HOURS = 5
 
 
-async def check_breaking_news(bot: Bot) -> None:
+async def run_breaking_digest(bot: Bot) -> None:
     """
-    Scan for high-impact breaking news and send each alert to the management
-    (approval) group with Approve / Discard buttons. If no admin responds within
-    BREAKING_AUTO_SEND_SECONDS (5 min), the alert auto-posts to the community.
+    Breaking-news digest. Runs on a fixed daytime schedule (6×/day).
 
-    Note: the 15-minute scheduler interval is how often we SCAN for news — it is
-    not the approval timeout. The approval timeout is the 5 minutes above.
+    1. Scan recent Gold / US-macro news.
+    2. Ask the AI to rank the 3 MOST market-moving stories.
+    3. Generate a bilingual alert for each and post all 3 to the management
+       (approval) group, each with a "Send this one" button.
+    4. Admin picks 1 → it posts to the community.
+    5. If no decision within BREAKING_AUTO_SEND_SECONDS (10 min), the AI's
+       #1 story auto-posts.
+
+    Quiet window: if no significant news is found, nothing goes to the
+    community — a short note is sent to the management group instead.
     """
     if config.BOT_PAUSED:
+        log.info("Bot is paused — skipping breaking-news digest")
         return
 
     try:
-        breaking = await check_for_breaking_news(hours_back=1)
+        # 1. Gather fresh, not-yet-sent candidates.
+        candidates = await check_for_breaking_news(hours_back=BREAKING_LOOKBACK_HOURS)
+        fresh = [c for c in candidates if not is_news_already_sent(c["title"])]
 
-        for item in breaking:
-            title = item["title"]
-            if is_news_already_sent(title):
-                continue
-
-            asset = item.get("asset", "both")
-            alert = await generate_breaking_news_alert(title, asset)
-            if not alert:
-                continue
-
-            # Mark as handled now so the same item isn't re-queued every scan.
-            mark_news_sent(title)
-
-            alert_text = truncate(alert)
-            uid = uuid.uuid4().hex[:8]
-
-            keyboard = InlineKeyboardMarkup([[
-                InlineKeyboardButton("✅ Approve & Post", callback_data=f"bnews:{uid}:approve"),
-                InlineKeyboardButton("❌ Discard", callback_data=f"bnews:{uid}:reject"),
-            ]])
-            sent = await bot.send_message(
+        if not fresh:
+            await bot.send_message(
                 chat_id=config.APPROVAL_GROUP_ID,
-                text=(
-                    f"🚨 *Breaking News — Approval Needed*\n\n{alert_text}\n\n"
-                    f"_Auto-posts to the community in 5 minutes if no decision._"
-                ),
+                text="🟢 No major Gold / US-macro news this window — nothing sent to the community.",
+            )
+            log.info("Breaking digest: quiet window, nothing posted")
+            return
+
+        # 2. Let the AI rank the most important stories.
+        headlines = [c["title"] for c in fresh]
+        top_idx = await select_top_breaking_news(headlines, top_n=BREAKING_OPTIONS)
+        chosen = [fresh[i] for i in top_idx] if top_idx else fresh[:BREAKING_OPTIONS]
+
+        # 3. Generate an alert for each chosen story (ranked, most important first).
+        alerts = await asyncio.gather(
+            *[generate_breaking_news_alert(c["title"], c.get("asset", "gold")) for c in chosen]
+        )
+        versions = [truncate(a) for a in alerts if a]
+
+        if not versions:
+            await bot.send_message(
+                chat_id=config.APPROVAL_GROUP_ID,
+                text="⚠️ Found breaking news but the AI failed to summarise it. Please check manually.",
+            )
+            log.error("Breaking digest: all AI summaries failed")
+            return
+
+        # Mark every presented story as sent so it can't resurface next run.
+        for c in chosen[:len(versions)]:
+            mark_news_sent(c["title"])
+
+        uid = uuid.uuid4().hex[:8]
+
+        # Intro
+        await bot.send_message(
+            chat_id=config.APPROVAL_GROUP_ID,
+            text=(
+                f"🔔 *Breaking News — Pick 1 of {len(versions)}*\n\n"
+                f"⏰ Auto-sends *Option 1* (AI's top pick) in 10 minutes if no selection."
+            ),
+            parse_mode=ParseMode.MARKDOWN,
+        )
+
+        # Each option with its own button
+        for i, version in enumerate(versions, 1):
+            keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton(
+                    f"✅ Send Option {i}",
+                    callback_data=f"bnews:{uid}:{i}",
+                )
+            ]])
+            await bot.send_message(
+                chat_id=config.APPROVAL_GROUP_ID,
+                text=f"*━━ Option {i} ━━*\n\n{version}",
                 parse_mode=ParseMode.MARKDOWN,
                 reply_markup=keyboard,
             )
+            await asyncio.sleep(0.5)  # avoid flood limits
 
-            task = asyncio.create_task(_auto_send_breaking(uid, bot))
-            _pending_breaking[uid] = {
-                "content": alert_text,
-                "task": task,
-                "sent": False,
-                "approval_chat_id": sent.chat_id,
-                "approval_msg_id": sent.message_id,
-            }
-            log.info(f"Breaking news queued for approval (5-min auto-send): {title[:60]}")
-            await asyncio.sleep(2)
+        # Skip button
+        skip_keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton("⏭️ Skip — post nothing", callback_data=f"bnews:{uid}:skip")
+        ]])
+        await bot.send_message(
+            chat_id=config.APPROVAL_GROUP_ID,
+            text="👆 Tap an option to post it to the community, or skip.",
+            reply_markup=skip_keyboard,
+        )
+
+        # Schedule the 10-minute auto-send of Option 1.
+        task = asyncio.create_task(_auto_send_breaking(uid, bot, versions[0]))
+        _pending_breaking[uid] = {
+            "versions": versions,
+            "task": task,
+            "sent": False,
+        }
+        log.info(f"Breaking digest posted for approval (uid={uid}, {len(versions)} options)")
 
     except Exception as e:
-        log.error(f"check_breaking_news failed: {e}", exc_info=True)
+        log.error(f"run_breaking_digest failed: {e}", exc_info=True)
 
 
-async def _auto_send_breaking(uid: str, bot: Bot) -> None:
-    """Auto-post a breaking-news item if no admin acts within the timeout."""
+async def _auto_send_breaking(uid: str, bot: Bot, version_1: str) -> None:
+    """Auto-post the AI's #1 story if no admin picks within the timeout."""
     try:
         await asyncio.sleep(BREAKING_AUTO_SEND_SECONDS)
     except asyncio.CancelledError:
@@ -420,31 +476,24 @@ async def _auto_send_breaking(uid: str, bot: Bot) -> None:
     try:
         await bot.send_message(
             chat_id=config.MARKET_GROUP_ID,
-            text=pending["content"],
+            text=version_1,
             parse_mode=ParseMode.MARKDOWN,
         )
-        log_message("market_bot", "breaking_auto", pending["content"], config.MARKET_GROUP_ID)
-        try:
-            await bot.edit_message_reply_markup(
-                chat_id=pending["approval_chat_id"],
-                message_id=pending["approval_msg_id"],
-                reply_markup=None,
-            )
-        except Exception:
-            pass
+        log_message("market_bot", "breaking_auto", version_1, config.MARKET_GROUP_ID)
         await bot.send_message(
             chat_id=config.APPROVAL_GROUP_ID,
-            text="⏰ Auto-posted breaking news to the community (no decision within 5 minutes).",
+            text="⏰ Auto-posted *Option 1* to the community (no selection within 10 minutes).",
+            parse_mode=ParseMode.MARKDOWN,
         )
-        log.info(f"Breaking news uid={uid} auto-sent after timeout")
+        log.info(f"Breaking digest uid={uid} auto-sent Option 1 after timeout")
     except Exception as e:
-        log.error(f"Auto-send breaking news uid={uid} failed: {e}")
+        log.error(f"Auto-send breaking digest uid={uid} failed: {e}")
 
 
 async def handle_breaking_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle Approve / Discard for a breaking-news item from the approval group.
+    """Handle option selection for a breaking-news digest from the approval group.
 
-    Callback data: bnews:{uid}:{approve|reject}
+    Callback data: bnews:{uid}:{option_number|skip}
     """
     query = update.callback_query
     await query.answer()
@@ -459,37 +508,48 @@ async def handle_breaking_callback(update: Update, ctx: ContextTypes.DEFAULT_TYP
     if not pending or pending["sent"]:
         try:
             await query.edit_message_reply_markup(reply_markup=None)
-            await query.message.reply_text("ℹ️ This breaking-news item was already handled or expired.")
+            await query.message.reply_text("ℹ️ This breaking-news digest was already handled or expired.")
         except Exception:
             pass
         return
 
-    # Stop the 5-minute auto-send timer — an admin is deciding now.
+    # Stop the 10-minute auto-send timer — an admin is deciding now.
     pending["task"].cancel()
     pending["sent"] = True
     _pending_breaking.pop(uid, None)
-    content = pending["content"]
 
     admin = update.effective_user.first_name if update.effective_user else "Admin"
 
-    if choice == "approve":
-        try:
-            await ctx.bot.send_message(
-                chat_id=config.MARKET_GROUP_ID,
-                text=content,
-                parse_mode=ParseMode.MARKDOWN,
-            )
-            log_message("market_bot", "breaking", content, config.MARKET_GROUP_ID)
-            await query.edit_message_reply_markup(reply_markup=None)
-            await query.message.reply_text(f"✅ Breaking news posted to community by {admin}.")
-            log.info(f"Breaking news uid={uid} approved by {update.effective_user.id}")
-        except Exception as e:
-            await query.message.reply_text(f"❌ Failed to post: {e}")
-            log.error(f"Failed to post approved breaking news uid={uid}: {e}")
-    else:
+    if choice == "skip":
+        await query.edit_message_text(f"⏭️ Breaking news skipped by {admin} — nothing was posted.")
+        log.info(f"Breaking digest uid={uid} skipped by {update.effective_user.id}")
+        return
+
+    try:
+        v_idx = int(choice) - 1
+    except ValueError:
+        await query.edit_message_text("⚠️ Invalid selection.")
+        return
+
+    if v_idx < 0 or v_idx >= len(pending["versions"]):
+        await query.edit_message_text("⚠️ Option not found.")
+        return
+
+    content = pending["versions"][v_idx]
+
+    try:
+        await ctx.bot.send_message(
+            chat_id=config.MARKET_GROUP_ID,
+            text=content,
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        log_message("market_bot", "breaking", content, config.MARKET_GROUP_ID)
         await query.edit_message_reply_markup(reply_markup=None)
-        await query.message.reply_text(f"❌ Breaking news discarded by {admin}. Nothing was posted.")
-        log.info(f"Breaking news uid={uid} discarded by {update.effective_user.id}")
+        await query.message.reply_text(f"✅ Option {choice} posted to community by {admin}.")
+        log.info(f"Breaking digest uid={uid} Option {choice} posted by {update.effective_user.id}")
+    except Exception as e:
+        await query.message.reply_text(f"❌ Failed to post: {e}")
+        log.error(f"Failed to post breaking Option {choice} uid={uid}: {e}")
 
 
 async def check_economic_calendar(bot: Bot) -> None:
@@ -529,6 +589,7 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     text = (
         "🤖 *Market Bot – Admin Commands*\n\n"
         "/testnews – Generate 3 Gold update versions for approval\n"
+        "/testbreaking – Run the breaking-news digest now (pick 1 of 3)\n"
         "/testmindset – Generate 3 mindset post versions for approval\n"
         "/share `<url>` [caption] – Share a link to the community group\n"
         "/pause – Pause all scheduled posts\n"
@@ -540,7 +601,10 @@ async def cmd_help(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         "Mon–Fri  06:30, 13:30, 18:30 → Approval versions sent\n"
         "Mon–Fri  07:00, 14:00, 19:00 → Posts to community\n"
         "Sat–Sun  19:30 → Approval versions sent\n"
-        "Sat–Sun  20:00 → Posts to community"
+        "Sat–Sun  20:00 → Posts to community\n\n"
+        "🚨 *Breaking News* (daily)\n"
+        "08:00, 11:00, 14:00, 17:00, 20:00, 23:00 → AI sends top 3 to pick from\n"
+        "Auto-posts Option 1 after 10 min if no pick (max 6 posts/day)"
     )
     await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
 
@@ -550,6 +614,13 @@ async def cmd_testnews(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     """Manually trigger the market update approval flow."""
     await update.message.reply_text("⚙️ Generating 3 market update versions…")
     await post_for_approval(ctx.bot, "market")
+
+
+@admin_only
+async def cmd_testbreaking(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """Manually run the breaking-news digest (pick 1 of 3)."""
+    await update.message.reply_text("⚙️ Running breaking-news digest…")
+    await run_breaking_digest(ctx.bot)
 
 
 @admin_only
@@ -645,6 +716,7 @@ def build_market_bot() -> tuple[Application, AsyncIOScheduler]:
     # Admin commands
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("testnews", cmd_testnews))
+    app.add_handler(CommandHandler("testbreaking", cmd_testbreaking))
     app.add_handler(CommandHandler("testmindset", cmd_testmindset))
     app.add_handler(CommandHandler("pause", cmd_pause))
     app.add_handler(CommandHandler("resume", cmd_resume))
@@ -687,13 +759,15 @@ def build_market_bot() -> tuple[Application, AsyncIOScheduler]:
         replace_existing=True,
     )
 
-    # Breaking news check every 15 minutes (every day)
+    # Breaking-news digest 6×/day (daytime-weighted SGT). Each run posts at most
+    # one story to the community → max 6 breaking posts per day.
     scheduler.add_job(
-        check_breaking_news,
-        trigger="interval",
-        minutes=config.NEWS_CHECK_INTERVAL,
+        run_breaking_digest,
+        trigger="cron",
+        hour="8,11,14,17,20,23",
+        minute=0,
         args=[bot],
-        id="breaking_news_check",
+        id="breaking_news_digest",
         replace_existing=True,
     )
 
