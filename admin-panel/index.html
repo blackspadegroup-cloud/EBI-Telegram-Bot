@@ -123,7 +123,8 @@
       </div>
       <div class="bmini">道</div>
     </div>
-    <div class="nav active" data-view="content"><i>▣</i><span class="lbl">Content</span></div>
+    <div class="nav active" data-view="dashboard"><i>◧</i><span class="lbl">Dashboard</span></div>
+    <div class="nav" data-view="content"><i>▣</i><span class="lbl">Content</span></div>
     <div class="nav" data-view="approvals"><i>✔</i><span class="lbl">Approvals</span><span class="badge hidden" id="apprBadge">0</span></div>
     <div class="nav" data-view="settings"><i>⚙</i><span class="lbl">Settings</span></div>
     <div class="nav" data-view="intent"><i>◎</i><span class="lbl">Intent rules</span></div>
@@ -272,7 +273,7 @@ async function boot(){
   $('#whoInitial').textContent = (ME.name[0]||'?').toUpperCase();
   $('#whoName').textContent = ME.name;
   $('#whoRole').textContent = ME.role === 'admin' ? 'Admin' : 'Editor';
-  bindNav(); render('content'); refreshApprovalCount();
+  bindNav(); render('dashboard'); refreshApprovalCount();
 }
 sb.auth.onAuthStateChange((event)=>{ if(event === 'PASSWORD_RECOVERY'){ showRecovery(); } });
 
@@ -288,10 +289,52 @@ function bindNav(){
 }
 
 function render(view){
-  const titles={content:'Content',approvals:'Approvals',settings:'Settings',intent:'Intent rules',faq:'FAQ',crm:'CRM',sentlog:'Sent log',education:'Education'};
+  const titles={dashboard:'Dashboard',content:'Content',approvals:'Approvals',settings:'Settings',intent:'Intent rules',faq:'FAQ',crm:'CRM',sentlog:'Sent log',education:'Education'};
   $('#viewTitle').textContent = titles[view]||'';
-  ({content:renderContent, approvals:renderApprovals, settings:renderSettings, intent:renderIntent,
-    faq:renderFaq, crm:renderCrm, sentlog:renderSentLog, education:renderEducation}[view]||renderContent)();
+  ({dashboard:renderDashboard, content:renderContent, approvals:renderApprovals, settings:renderSettings, intent:renderIntent,
+    faq:renderFaq, crm:renderCrm, sentlog:renderSentLog, education:renderEducation}[view]||renderDashboard)();
+}
+
+// ── Management dashboard ──
+async function renderDashboard(){
+  if(!CRM_STAGES.length){ const {data}=await sb.from('crm_pipeline_stages').select('*').order('sort_order'); CRM_STAGES=data||[]; }
+  $('#view').innerHTML='<p class="muted">Loading dashboard…</p>';
+  const leadsR=await sb.from('crm_leads').select('id,stage,source,owner,created_at');
+  const tasksR=await sb.from('crm_tasks').select('status,due_at');
+  const actR=await sb.from('crm_activities').select('summary,actor,at').order('at',{ascending:false}).limit(8);
+  const leads=leadsR.data||[]; const tasks=tasksR.data||[];
+  const now=new Date(); const wk=new Date(now.getTime()-7*864e5);
+  const total=leads.length;
+  const newWk=leads.filter(l=> new Date(l.created_at)>wk).length;
+  const fundedStages=new Set(['first_deposit','active','reactivated']);
+  const funded=leads.filter(l=> fundedStages.has(l.stage)).length;
+  const conv= total? Math.round(funded/total*100):0;
+  const openT=tasks.filter(t=>t.status==='open').length;
+  const overdue=tasks.filter(t=>t.status==='open' && t.due_at && new Date(t.due_at)<now).length;
+  const byStage={}; CRM_STAGES.forEach(s=>byStage[s.key]=0); leads.forEach(l=>{byStage[l.stage]=(byStage[l.stage]||0)+1;});
+  const maxStage=Math.max(1,...CRM_STAGES.map(s=>byStage[s.key]||0));
+  const bySrc={}; leads.forEach(l=>{const k=l.source||'—';bySrc[k]=(bySrc[k]||0)+1;});
+  const byOwn={}; leads.forEach(l=>{const k=l.owner||'unassigned';byOwn[k]=(byOwn[k]||0)+1;});
+  function bars(obj){ const m=Math.max(1,...Object.values(obj)); return Object.entries(obj).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([k,v])=>'<div style="display:flex;align-items:center;gap:8px;font-size:12px;margin-bottom:6px"><span style="width:108px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(k)+'</span><span style="flex:1;height:9px;background:var(--gold);border-radius:3px;max-width:'+Math.round(v/m*100)+'%;display:block"></span><span style="width:26px;text-align:right">'+v+'</span></div>').join(''); }
+  const tiles=[['Total leads',total,''],['New (7d)',newWk,''],['Funded / active',conv+'%',''],['Open tasks',openT,''],['Overdue',overdue,overdue?'bad':'']];
+  let html='<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:16px">'+
+    tiles.map(t=>'<div style="background:var(--panel2);border-radius:8px;padding:12px"><div style="font-size:11px;color:var(--muted)">'+t[0]+'</div><div style="font-size:22px;font-weight:500;color:'+(t[2]==='bad'?'var(--bad)':'var(--text)')+'">'+t[1]+'</div></div>').join('')+'</div>';
+  html+='<div class="card"><div style="font-weight:500;margin-bottom:10px">Pipeline funnel</div>';
+  CRM_STAGES.forEach(s=>{ const v=byStage[s.key]||0; html+='<div style="display:flex;align-items:center;gap:8px;font-size:12px;margin-bottom:6px"><span style="width:108px;color:var(--muted)">'+esc(s.label)+'</span><span style="flex:1;height:9px;background:var(--gold);border-radius:3px;max-width:'+Math.round(v/maxStage*100)+'%;display:block"></span><span style="width:26px;text-align:right">'+v+'</span></div>'; });
+  html+='</div>';
+  html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">'+
+    '<div class="card"><div style="font-weight:500;margin-bottom:10px">Leads by source</div>'+(total?bars(bySrc):'<p class="muted" style="font-size:12px">No leads yet.</p>')+'</div>'+
+    '<div class="card"><div style="font-weight:500;margin-bottom:10px">Leads by owner</div>'+(total?bars(byOwn):'<p class="muted" style="font-size:12px">No leads yet.</p>')+'</div></div>';
+  html+='<div class="seg">RECENT ACTIVITY</div><div class="card">';
+  if(!actR.data||!actR.data.length) html+='<p class="muted" style="font-size:12px">No activity yet.</p>';
+  (actR.data||[]).forEach(a=>{ let w=a.at; try{w=new Date(a.at).toLocaleString();}catch(e){} html+='<div style="font-size:12px;margin-bottom:6px"><span class="muted">'+esc(w)+' · '+esc(a.actor||'')+'</span> — '+esc(a.summary||'')+'</div>'; });
+  html+='</div><div class="seg">COMMUNITY</div><div class="card" id="commCard"><p class="muted" style="font-size:12px">Loading…</p></div>';
+  $('#view').innerHTML=html;
+  try{
+    const mem=await sb.from('telegram_subscribers').select('chat_id',{count:'exact',head:true});
+    const sig=await sb.from('bot_intent_events').select('id',{count:'exact',head:true}).gte('created_at', wk.toISOString());
+    $('#commCard').innerHTML='<div class="row"><span class="muted" style="font-size:12px">Community members: <b style="color:var(--text)">'+(mem.count!=null?mem.count:'—')+'</b></span><span class="muted" style="font-size:12px">Intent signals (7d): <b style="color:var(--text)">'+(sig.count!=null?sig.count:'—')+'</b></span></div>';
+  }catch(e){ $('#commCard').innerHTML='<p class="muted" style="font-size:12px">Community metrics unavailable.</p>'; }
 }
 
 // ── Settings (admin writes; editors read-only) ──

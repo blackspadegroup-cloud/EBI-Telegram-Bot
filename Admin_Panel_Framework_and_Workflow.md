@@ -188,6 +188,7 @@ Separate from the live marketing site so it can never affect it. Cost: $0.
 - ✅ CRM Phase 1 tables: `crm_leads`, `crm_pipeline_stages` (11 seeded), `crm_lead_history`, `crm_tasks`, `crm_activities` (RLS-enforced)
 - ✅ Panel CRM rebuilt: **Pipeline** (11-stage drag-and-drop board), **Leads** (inbox + add + import Telegram signals), **lead profile** (fields, notes, tags, tasks, activity timeline), **Tasks** (due-sorted, complete)
 - ✅ Verified live (insert/move/activity/cascade)
+- ✅ Management dashboard (landing page): KPI tiles, pipeline funnel, leads by source/owner, recent activity, community metrics
 - ⬜ Phase 2 (gated on broker API): deposits/revenue, IB module, comms center, automation, support, marketing analytics — see design doc
 - ⬜ Reminder to Steve: confirm AIMS FX / MetaApi API access before Phase 2
 
