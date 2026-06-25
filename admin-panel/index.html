@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>EBI Admin · Elite By Infinity</title>
+<style>
+  :root{
+    --bg:#14141E; --panel:#1B1B29; --panel2:#21212F; --border:#2E2E40;
+    --gold:#C9A227; --gold-soft:#E8C766; --text:#ECECEF; --muted:#9A9AAE;
+    --ok:#7FCF9E; --okbg:#16271d; --warn:#E8C766; --warnbg:#2a2413; --bad:#D98A8A;
+  }
+  [data-theme="light"]{
+    --bg:#F6F4EE; --panel:#FFFFFF; --panel2:#F0EDE4; --border:#E2DCCB;
+    --gold:#B8860B; --gold-soft:#8A6D12; --text:#23231F; --muted:#6B6B5E;
+    --ok:#2f7d4f; --okbg:#e8f5ec; --warn:#8a6d12; --warnbg:#fbf3da; --bad:#a33;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.5}
+  a{color:var(--gold)}
+  .hidden{display:none!important}
+  .gold{color:var(--gold)}
+  .muted{color:var(--muted)}
+  button{font-family:inherit;cursor:pointer;border-radius:8px;border:1px solid var(--border);background:var(--panel2);color:var(--text);padding:8px 14px;font-size:13px}
+  button.primary{background:var(--gold);color:#1B1B29;border-color:var(--gold);font-weight:500}
+  button.ghost{background:transparent;color:var(--gold);border-color:var(--border)}
+  button.danger{background:transparent;color:var(--bad);border-color:var(--border)}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  input,textarea{font-family:inherit;width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:13px}
+  textarea{min-height:74px;line-height:1.6;resize:vertical}
+  .pill{font-size:11px;border-radius:10px;padding:2px 9px;border:1px solid var(--border)}
+  .pill.ok{color:var(--ok);background:var(--okbg);border-color:var(--ok)}
+  .pill.warn{color:var(--warn);background:var(--warnbg);border-color:var(--warn)}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:14px}
+  /* login */
+  #login{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+  #login .box{width:360px;max-width:100%;background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:28px}
+  /* app shell */
+  #app{display:flex;min-height:100vh}
+  #side{width:200px;background:var(--panel);border-right:1px solid var(--border);padding:16px 12px;display:flex;flex-direction:column;gap:2px}
+  #side .brand{padding:4px 8px 16px}
+  #side .nav{display:flex;align-items:center;gap:10px;padding:9px 11px;border-radius:8px;color:var(--muted);font-size:13px;border-left:3px solid transparent;cursor:pointer}
+  #side .nav.active{background:var(--panel2);border-left-color:var(--gold);color:var(--gold-soft)}
+  #side .nav .badge{margin-left:auto;background:var(--gold);color:#1B1B29;font-size:11px;border-radius:10px;padding:0 7px}
+  #main{flex:1;padding:22px 26px;max-width:860px}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .topbar{margin-bottom:18px}
+  .seg{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin:18px 0 8px}
+  .who{display:flex;align-items:center;gap:9px;margin-top:auto;border-top:1px solid var(--border);padding-top:12px}
+  .who .ring{width:30px;height:30px;border-radius:50%;border:1.5px solid var(--gold);color:var(--gold);display:flex;align-items:center;justify-content:center;font-weight:500;font-size:12px}
+  .ctrls{display:flex;gap:8px;align-items:center}
+  .lab{font-size:11px;color:var(--muted);margin:8px 0 3px}
+</style>
+</head>
+<body>
+
+<!-- ───────────── LOGIN ───────────── -->
+<div id="login">
+  <div class="box">
+    <div style="font-weight:500;letter-spacing:.5px">ELITE BY INFINITY</div>
+    <div class="gold" style="letter-spacing:3px;font-size:12px;margin-top:2px">道法术器 · admin</div>
+
+    <div id="loginBox">
+      <p class="muted" style="margin:18px 0 14px">Sign in with your authorised email and password.</p>
+      <input id="email" type="email" placeholder="you@example.com" autocomplete="email" />
+      <input id="pwd" type="password" placeholder="Password" autocomplete="current-password" style="margin-top:10px" />
+      <button class="primary" style="width:100%;margin-top:12px" id="signIn">Sign in</button>
+      <div style="display:flex;justify-content:space-between;margin-top:10px">
+        <a href="#" id="forgot" style="font-size:12px">Forgot password?</a>
+        <a href="#" id="firstTime" style="font-size:12px">First time? Set password</a>
+      </div>
+      <p id="loginMsg" class="muted" style="margin-top:12px;font-size:12px"></p>
+      <p class="muted" style="margin-top:10px;font-size:11px">No password yet and prefer not to set one? <a href="#" id="magic">Email me a one-time link</a>.</p>
+    </div>
+
+    <div id="recoveryBox" class="hidden">
+      <p class="muted" style="margin:18px 0 12px">Set a new password for your account.</p>
+      <input id="newPwd" type="password" placeholder="New password (min 8 characters)" autocomplete="new-password" />
+      <button class="primary" style="width:100%;margin-top:12px" id="setPwd">Update password</button>
+      <p id="recMsg" class="muted" style="margin-top:12px;font-size:12px"></p>
+    </div>
+
+    <button class="ghost" id="themeToggleLogin" style="margin-top:14px">Toggle day / night</button>
+  </div>
+</div>
+
+<!-- ───────────── APP ───────────── -->
+<div id="app" class="hidden">
+  <nav id="side">
+    <div class="brand">
+      <div style="font-weight:500;letter-spacing:.5px">ELITE BY INFINITY</div>
+      <div class="gold" style="letter-spacing:3px;font-size:11px;margin-top:2px">道法术器 · admin</div>
+    </div>
+    <div class="nav active" data-view="content"><i>▣</i> Content</div>
+    <div class="nav" data-view="approvals"><i>✔</i> Approvals <span class="badge hidden" id="apprBadge">0</span></div>
+    <div class="nav" data-view="soon"><i>⚙</i> Settings</div>
+    <div class="nav" data-view="soon"><i>◎</i> Intent rules</div>
+    <div class="nav" data-view="soon"><i>?</i> FAQ</div>
+    <div class="nav" data-view="soon"><i>☷</i> CRM</div>
+    <div class="nav" data-view="soon"><i>➤</i> Sent log</div>
+    <div class="nav" data-view="soon"><i>▦</i> Education</div>
+    <div class="who">
+      <span class="ring" id="whoInitial">?</span>
+      <div style="flex:1">
+        <div id="whoName" style="font-size:12px"></div>
+        <div id="whoRole" class="gold" style="font-size:11px"></div>
+      </div>
+    </div>
+    <button class="ghost" id="themeToggle" style="margin-top:10px">Day / night</button>
+    <button class="ghost" id="signOut" style="margin-top:6px">Sign out</button>
+  </nav>
+
+  <main id="main">
+    <div class="topbar row">
+      <h2 id="viewTitle" style="margin:0;font-size:18px;font-weight:500">Content</h2>
+      <span class="muted" style="font-size:12px">EN · 中文</span>
+    </div>
+    <div id="view"></div>
+  </main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const SUPABASE_URL = "https://jnyzkukhrwgiaqqtwfvv.supabase.co";
+const SUPABASE_KEY = "sb_publishable_xcky__tL_O1pXE1FMJ8Ivw_1DY4pj_y";
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+let ME = { email:null, role:null, name:null };
+const $ = s => document.querySelector(s);
+const esc = s => (s||"").replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+// ── Theme (persisted) ──
+function applyTheme(t){ document.documentElement.setAttribute('data-theme', t); try{ localStorage.setItem('ebi_theme', t);}catch(e){} }
+function toggleTheme(){ applyTheme(document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark'); }
+try{ const saved = localStorage.getItem('ebi_theme'); if(saved) applyTheme(saved); }catch(e){}
+$('#themeToggle').onclick = toggleTheme;
+$('#themeToggleLogin').onclick = toggleTheme;
+
+// ── Auth ──
+const REDIRECT = location.href.split('#')[0].split('?')[0];
+function setMsg(t){ $('#loginMsg').textContent = t; }
+
+$('#signIn').onclick = async () => {
+  const email = $('#email').value.trim().toLowerCase();
+  const password = $('#pwd').value;
+  if(!email || !password){ setMsg('Enter your email and password.'); return; }
+  $('#signIn').disabled = true; setMsg('Signing in…');
+  const { error } = await sb.auth.signInWithPassword({ email, password });
+  $('#signIn').disabled = false;
+  if(error){ setMsg('Sign-in failed: ' + error.message); return; }
+  boot();
+};
+
+// First-time users: type email + the password you want, then tap this.
+$('#firstTime').onclick = async (e) => {
+  e.preventDefault();
+  const email = $('#email').value.trim().toLowerCase();
+  const password = $('#pwd').value;
+  if(!email || !password){ setMsg('Type your email and the password you want, then tap “Set password”.'); return; }
+  if(password.length < 8){ setMsg('Choose a password of at least 8 characters.'); return; }
+  const { error } = await sb.auth.signUp({ email, password, options:{ emailRedirectTo: REDIRECT } });
+  if(error){ setMsg('Could not set password: ' + error.message); return; }
+  setMsg('Password set. If a confirmation email arrives, click it once, then sign in. ✓');
+};
+
+$('#forgot').onclick = async (e) => {
+  e.preventDefault();
+  const email = $('#email').value.trim().toLowerCase();
+  if(!email){ setMsg('Enter your email first, then tap “Forgot password?”.'); return; }
+  const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: REDIRECT });
+  setMsg(error ? ('Error: ' + error.message) : 'Password-reset email sent. Check your inbox. ✓');
+};
+
+$('#magic').onclick = async (e) => {
+  e.preventDefault();
+  const email = $('#email').value.trim().toLowerCase();
+  if(!email){ setMsg('Enter your email first.'); return; }
+  const { error } = await sb.auth.signInWithOtp({ email, options:{ emailRedirectTo: REDIRECT } });
+  setMsg(error ? ('Error: ' + error.message) : 'One-time login link sent. Check your inbox. ✓');
+};
+
+$('#setPwd').onclick = async () => {
+  const password = $('#newPwd').value;
+  if(!password || password.length < 8){ $('#recMsg').textContent = 'Choose a password of at least 8 characters.'; return; }
+  $('#setPwd').disabled = true;
+  const { error } = await sb.auth.updateUser({ password });
+  $('#setPwd').disabled = false;
+  if(error){ $('#recMsg').textContent = 'Failed: ' + error.message; return; }
+  $('#recMsg').textContent = 'Password updated. Loading…';
+  history.replaceState(null, '', location.pathname);
+  $('#recoveryBox').classList.add('hidden'); $('#loginBox').classList.remove('hidden');
+  boot();
+};
+
+function showRecovery(){
+  $('#login').classList.remove('hidden');
+  $('#app').classList.add('hidden');
+  $('#loginBox').classList.add('hidden');
+  $('#recoveryBox').classList.remove('hidden');
+}
+
+$('#signOut').onclick = async () => { await sb.auth.signOut(); location.reload(); };
+
+async function boot(){
+  if(location.hash.includes('type=recovery')){ showRecovery(); return; }
+  const { data:{ session } } = await sb.auth.getSession();
+  if(!session){ $('#login').classList.remove('hidden'); $('#app').classList.add('hidden'); return; }
+  ME.email = (session.user.email||'').toLowerCase();
+  const { data: row } = await sb.from('bot_panel_users').select('role,display_name').ilike('email', ME.email).maybeSingle();
+  if(!row){
+    $('#login').classList.remove('hidden');
+    $('#loginMsg').textContent = 'This email is not authorised for the admin panel. Ask Steve to add you.';
+    await sb.auth.signOut();
+    return;
+  }
+  ME.role = row.role; ME.name = row.display_name || ME.email;
+  $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
+  $('#whoInitial').textContent = (ME.name[0]||'?').toUpperCase();
+  $('#whoName').textContent = ME.name;
+  $('#whoRole').textContent = ME.role === 'admin' ? 'Admin' : 'Editor';
+  bindNav(); render('content'); refreshApprovalCount();
+}
+sb.auth.onAuthStateChange((event)=>{ if(event === 'PASSWORD_RECOVERY'){ showRecovery(); } });
+
+// ── Navigation ──
+function bindNav(){
+  document.querySelectorAll('#side .nav').forEach(el=>{
+    el.onclick = () => {
+      document.querySelectorAll('#side .nav').forEach(n=>n.classList.remove('active'));
+      el.classList.add('active');
+      render(el.dataset.view);
+    };
+  });
+}
+
+function render(view){
+  if(view==='content'){ $('#viewTitle').textContent='Content'; renderContent(); }
+  else if(view==='approvals'){ $('#viewTitle').textContent='Approvals'; renderApprovals(); }
+  else { $('#viewTitle').textContent='Coming next'; $('#view').innerHTML =
+    '<div class="card"><p class="muted">This section is part of the next build slice. Content editing and the approval queue are live now — Settings, Intent rules, FAQ, CRM, Sent log and Education arrive next.</p></div>'; }
+}
+
+// ── Content editor ──
+async function renderContent(){
+  $('#view').innerHTML = '<p class="muted">Loading content…</p>';
+  const { data, error } = await sb.from('bot_content_versions')
+    .select('content_key,lang,value,version,status').eq('status','approved')
+    .order('content_key',{ascending:true}).order('version',{ascending:false});
+  if(error){ $('#view').innerHTML = '<div class="card">Error: '+esc(error.message)+'</div>'; return; }
+  const latest = {};
+  (data||[]).forEach(r=>{ const k=r.content_key+'|'+r.lang; if(!(k in latest)) latest[k]=r; });
+  const keys = [...new Set(Object.values(latest).map(r=>r.content_key))].sort();
+  let html = '<p class="muted" style="margin-top:0">Edit a message and submit it for review. '+
+    (ME.role==='admin'?'As admin, your submissions can be approved from the Approvals tab.':'Your changes go to Steve for approval before going live.')+'</p>';
+  keys.forEach(key=>{
+    const en = latest[key+'|en'], zh = latest[key+'|zh'];
+    html += '<div class="card">'+
+      '<div class="row"><span style="font-weight:500">'+esc(key)+'</span><span class="pill ok">approved · live</span></div>'+
+      '<div class="lab">English</div><textarea data-k="'+esc(key)+'" data-l="en">'+esc(en?en.value:'')+'</textarea>'+
+      '<div class="lab">中文</div><textarea data-k="'+esc(key)+'" data-l="zh">'+esc(zh?zh.value:'')+'</textarea>'+
+      '<div style="margin-top:10px"><button class="primary" data-submit="'+esc(key)+'">Submit for review</button></div>'+
+      '</div>';
+  });
+  $('#view').innerHTML = html;
+  document.querySelectorAll('[data-submit]').forEach(b=>{
+    b.onclick = () => submitContent(b.dataset.submit, b);
+  });
+}
+
+async function submitContent(key, btn){
+  btn.disabled = true; btn.textContent = 'Submitting…';
+  const fields = document.querySelectorAll('[data-k="'+CSS.escape(key)+'"]');
+  let ok = true;
+  for(const f of fields){
+    const lang = f.dataset.l, value = f.value;
+    // next version = max existing for this key+lang + 1
+    const { data: maxRows } = await sb.from('bot_content_versions')
+      .select('version').eq('content_key',key).eq('lang',lang)
+      .order('version',{ascending:false}).limit(1);
+    const nextV = ((maxRows&&maxRows[0]&&maxRows[0].version)||0)+1;
+    const { error } = await sb.from('bot_content_versions').insert({
+      content_key:key, lang, value, status:'pending', version:nextV, created_by:ME.email
+    });
+    if(error){ ok=false; alert('Submit failed: '+error.message); break; }
+  }
+  await logAudit('submit_content', key);
+  btn.disabled=false; btn.textContent = ok ? 'Submitted ✓ (pending review)' : 'Submit for review';
+  refreshApprovalCount();
+}
+
+// ── Approvals (admin) ──
+async function renderApprovals(){
+  if(ME.role!=='admin'){ $('#view').innerHTML='<div class="card"><p class="muted">Only the admin (Steve) can approve content. Your submissions appear here for him to review.</p></div>'; return; }
+  $('#view').innerHTML = '<p class="muted">Loading pending submissions…</p>';
+  const { data, error } = await sb.from('bot_content_versions')
+    .select('id,content_key,lang,value,version,created_by,created_at').eq('status','pending')
+    .order('created_at',{ascending:true});
+  if(error){ $('#view').innerHTML='<div class="card">Error: '+esc(error.message)+'</div>'; return; }
+  if(!data || !data.length){ $('#view').innerHTML='<div class="card"><p class="muted">Nothing pending. You\'re all caught up. ✓</p></div>'; return; }
+  let html='';
+  data.forEach(r=>{
+    html += '<div class="card">'+
+      '<div class="row"><span style="font-weight:500">'+esc(r.content_key)+' · '+esc(r.lang)+' <span class="muted">v'+r.version+' — by '+esc(r.created_by||'?')+'</span></span><span class="pill warn">pending</span></div>'+
+      '<div class="lab">Proposed text</div>'+
+      '<div style="font-size:13px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:9px 11px;line-height:1.6;margin-bottom:10px">'+esc(r.value)+'</div>'+
+      '<div class="ctrls"><button class="primary" data-app="'+r.id+'">Approve &amp; publish</button>'+
+      '<button class="danger" data-rej="'+r.id+'">Reject</button></div>'+
+      '</div>';
+  });
+  $('#view').innerHTML = html;
+  document.querySelectorAll('[data-app]').forEach(b=> b.onclick=()=>decide(b.dataset.app,'approved',b));
+  document.querySelectorAll('[data-rej]').forEach(b=> b.onclick=()=>decide(b.dataset.rej,'rejected',b));
+}
+
+async function decide(id, status, btn){
+  btn.disabled=true;
+  const { error } = await sb.from('bot_content_versions').update({ status, reviewed_by:ME.email }).eq('id', id);
+  if(error){ alert('Failed: '+error.message); btn.disabled=false; return; }
+  await logAudit(status==='approved'?'approve_content':'reject_content', String(id));
+  renderApprovals(); refreshApprovalCount();
+}
+
+async function refreshApprovalCount(){
+  const { count } = await sb.from('bot_content_versions').select('id',{count:'exact',head:true}).eq('status','pending');
+  const badge = $('#apprBadge');
+  if(count){ badge.textContent=count; badge.classList.remove('hidden'); } else { badge.classList.add('hidden'); }
+}
+
+async function logAudit(action, entity_id){
+  try{ await sb.from('bot_audit_log').insert({ actor:ME.email, action, entity:'bot_content_versions', entity_id }); }catch(e){}
+}
+
+boot();
+</script>
+</body>
+</html>

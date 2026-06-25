@@ -162,15 +162,15 @@ Legend: ⬜ Not started · 🟡 In progress · ✅ Done · 🔴 Urgent
 Hosted free on Cloudflare Pages, served at **admin.elitesbyinfinity.com** (free subdomain).
 Separate from the live marketing site so it can never affect it. Cost: $0.
 - ✅ `bot_panel_users` roles table + `is_panel_admin()/is_panel_user()` helpers (Steve = sole admin)
-- ⬜ RLS policies on all `bot_` tables (panel users read; editors submit; admin approves)
-- ⬜ Scaffold Vite + React app + Supabase email login
-- ⬜ Editor UI: draft + submit (messages, FAQ, course)
-- ⬜ Admin UI: approval queue (approve / reject + note)
-- ⬜ Admin UI: settings (toggles, time pickers), intent rules
+- ✅ RLS policies on all `bot_` tables (panel users read; editors submit draft/pending; only admin approves)
+- ✅ Scaffold app — static no-build `admin-panel/index.html` (supabase-js CDN) + email magic-link login
+- ✅ Editor UI: content editor (draft → submit) — first slice
+- ✅ Admin UI: approval queue (approve / reject)
+- ✅ Day/night theme toggle
+- ⬜ Remaining UIs: settings, intent rules, FAQ, CRM, sent log, education grid
 - ⬜ Markdown safety: validate/escape content on save
 - ⬜ Submit/approve notifications (Telegram DM to Steve)
-- ⬜ Sent-message log view (read-only, both Analytic + Community bots)
-- ⬜ Deploy to Cloudflare Pages + point `admin.elitesbyinfinity.com` DNS
+- ⬜ Deploy to Cloudflare Pages (free) + point `admin.elitesbyinfinity.com` DNS
 - ⬜ Enable Email auth in Supabase + add team editor emails to `bot_panel_users`
 
 ### Stage 3 — EBI Education Bot (30-day course)
