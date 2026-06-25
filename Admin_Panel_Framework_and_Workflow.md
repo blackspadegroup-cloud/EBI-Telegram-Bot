@@ -152,9 +152,10 @@ Legend: ⬜ Not started · 🟡 In progress · ✅ Done · 🔴 Urgent
 - 🟡 **Commit message provided to Steve → Steve pushes** (code is uncommitted)
 
 ### Stage 1b — Remaining content types
-- 🟡 `bot_faq_versions` table created — bot FAQ-check wiring pending
-- 🟡 `bot_intent_rules` table created — `intent.py` refactor pending
+- ✅ `bot_faq_versions` + FAQ check runs before the AI (empty table = no-op; team adds entries)
+- ✅ `bot_intent_rules` + `intent.py` reads DB rules with fallback (self-seeds from code on next deploy)
 - ✅ `bot_edu_lessons` table created + 30 empty days seeded
+- ✅ `/reload` reports content / settings / intent-rule / FAQ counts for quick verification
 
 ### Stage 2 — Admin website
 - ⬜ Scaffold Next.js app + Supabase Auth (email login)

@@ -27,6 +27,8 @@ log = get_logger("store")
 # ── In-memory caches (module-level; shared across both bots in one process) ────
 _content_cache: dict[tuple[str, str], str] = {}   # (content_key, lang) -> value
 _settings_cache: dict[str, Any] = {}              # key -> value
+_intent_rules_cache: list[dict] = []              # active intent rules (ordered)
+_faq_cache: list[dict] = []                       # approved FAQ entries
 _loaded: bool = False
 
 
@@ -51,6 +53,33 @@ def is_paused() -> bool:
 
 def loaded() -> bool:
     return _loaded
+
+
+def get_intent_rules() -> list[dict]:
+    """Active intent rules from the DB, or [] to signal 'fall back to code'."""
+    return _intent_rules_cache
+
+
+def get_faq() -> list[dict]:
+    """Approved FAQ entries from the DB (empty list if none)."""
+    return _faq_cache
+
+
+def match_faq(text: str, lang: str = "en") -> Optional[str]:
+    """Return a canned FAQ answer if the text matches an entry's tags, else None.
+
+    Matching is deterministic: if any of an entry's tags appears (case-insensitive)
+    in the member's text, that entry wins (first by load order). Empty FAQ table →
+    always None, so the bot simply falls through to the AI.
+    """
+    if not _faq_cache:
+        return None
+    low = (text or "").lower()
+    for entry in _faq_cache:
+        tags = entry.get("tags") or []
+        if any(tag and tag.lower() in low for tag in tags):
+            return entry.get(f"answer_{lang}") or entry.get("answer_en")
+    return None
 
 
 # ── Writes ────────────────────────────────────────────────────────────────────
@@ -95,19 +124,46 @@ def _fetch_settings() -> dict[str, Any]:
     return {row["key"]: row["value"] for row in (res.data or [])}
 
 
+def _fetch_intent_rules() -> list[dict]:
+    res = (
+        get_db().table("bot_intent_rules")
+        .select("keywords,label,points,send_alert,sort_order")
+        .eq("active", True)
+        .order("sort_order", desc=False)
+        .execute()
+    )
+    return res.data or []
+
+
+def _fetch_faq() -> list[dict]:
+    res = (
+        get_db().table("bot_faq_versions")
+        .select("question,answer_en,answer_zh,tags,version")
+        .eq("status", "approved")
+        .order("version", desc=True)
+        .execute()
+    )
+    return res.data or []
+
+
 def refresh_sync() -> None:
     """Reload caches from Supabase. Safe: on error, keep the existing cache."""
-    global _content_cache, _settings_cache, _loaded
+    global _content_cache, _settings_cache, _intent_rules_cache, _faq_cache, _loaded
     try:
         content = _fetch_content()
         settings = _fetch_settings()
-        # Only swap in if the fetch succeeded (avoids wiping cache on a half-failure)
+        intent_rules = _fetch_intent_rules()
+        faq = _fetch_faq()
+        # Only swap in after all fetches succeed (avoids wiping cache on a half-failure)
         _content_cache = content
         _settings_cache = settings
+        _intent_rules_cache = intent_rules
+        _faq_cache = faq
         _loaded = True
         log.info(
             f"store refreshed: {len(_content_cache)} content rows, "
-            f"{len(_settings_cache)} settings"
+            f"{len(_settings_cache)} settings, {len(_intent_rules_cache)} intent rules, "
+            f"{len(_faq_cache)} FAQ"
         )
     except Exception as e:
         log.error(f"store refresh failed (keeping existing cache): {e}")
@@ -145,13 +201,44 @@ def seed_content_if_empty(strings: dict) -> None:
         log.error(f"seed_content_if_empty failed: {e}")
 
 
+def seed_intent_rules_if_empty(rules: list) -> None:
+    """One-time seed of bot_intent_rules from the in-code INTENT_RULES list.
+
+    `rules` is the list of (keywords, label, points, send_alert) tuples. Only
+    inserts if the table is empty, so panel edits are never clobbered.
+    """
+    try:
+        existing = get_db().table("bot_intent_rules").select("id").limit(1).execute()
+        if existing.data:
+            return
+        payload = []
+        for i, rule in enumerate(rules):
+            keywords, label, points, send_alert = rule
+            payload.append({
+                "keywords": list(keywords),
+                "label": label,
+                "points": points,
+                "send_alert": send_alert,
+                "active": True,
+                "sort_order": i,
+                "updated_by": "seed",
+            })
+        if payload:
+            get_db().table("bot_intent_rules").insert(payload).execute()
+            log.info(f"Seeded {len(payload)} intent rules from code defaults")
+    except Exception as e:
+        log.error(f"seed_intent_rules_if_empty failed: {e}")
+
+
 # ── Async entry points (run the sync DB work off the event loop) ──────────────
 
-async def initial_load(strings: Optional[dict] = None) -> None:
+async def initial_load(strings: Optional[dict] = None, intent_rules: Optional[list] = None) -> None:
     """Seed (if empty) then load caches. Call once at startup."""
     loop = asyncio.get_event_loop()
     if strings is not None:
         await loop.run_in_executor(None, seed_content_if_empty, strings)
+    if intent_rules is not None:
+        await loop.run_in_executor(None, seed_intent_rules_if_empty, intent_rules)
     await loop.run_in_executor(None, refresh_sync)
 
 

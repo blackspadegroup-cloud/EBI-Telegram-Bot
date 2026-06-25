@@ -380,6 +380,17 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None
             except Exception as e:
                 log.warning(f"Could not send intent alert: {e}")
 
+    # ── 8b. FAQ check (admin-curated answers take priority over the AI) ───────
+    faq_answer = store.match_faq(question, lang)
+    if faq_answer:
+        if not is_private:
+            _record_question(user.id)
+        full_faq = faq_answer + soft_cta if soft_cta else faq_answer
+        await msg.reply_text(truncate(full_faq), parse_mode=ParseMode.MARKDOWN)
+        log_qa(user.id, question, full_faq)
+        log_message("community_bot", "faq", full_faq, msg.chat_id)
+        return
+
     # ── 9. AI answer ──────────────────────────────────────────────────────────
     if not is_private:
         _record_question(user.id)
@@ -868,7 +879,8 @@ async def cmd_reload(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     await store.refresh()
     await update.message.reply_text(
         f"🔄 Reloaded.\nAdmin IDs: `{new_ids}`\n"
-        f"Content rows: `{len(store._content_cache)}` · Settings: `{len(store._settings_cache)}`",
+        f"Content: `{len(store._content_cache)}` · Settings: `{len(store._settings_cache)}` · "
+        f"Intent rules: `{len(store._intent_rules_cache)}` · FAQ: `{len(store._faq_cache)}`",
         parse_mode=ParseMode.MARKDOWN,
     )
 

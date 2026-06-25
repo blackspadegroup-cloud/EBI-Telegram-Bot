@@ -51,7 +51,8 @@ async def run_all() -> None:
     # fall back to the hardcoded defaults.
     from services import store
     from services.i18n import STRINGS
-    await store.initial_load(STRINGS)
+    from services.intent import INTENT_RULES
+    await store.initial_load(STRINGS, INTENT_RULES)
 
     # Build both bots (both return (Application, AsyncIOScheduler))
     market_app, market_scheduler = build_market_bot()

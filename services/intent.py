@@ -139,7 +139,22 @@ def detect_intent(text: str) -> dict | None:
     text_lower = text.lower()
     best: dict | None = None
 
-    for keywords, label, points, send_alert in INTENT_RULES:
+    # Prefer admin-managed rules from the DB-backed store; fall back to the
+    # in-code INTENT_RULES if the store has none (DB empty/unreachable).
+    rules_iter = INTENT_RULES
+    try:
+        from services import store
+        db_rules = store.get_intent_rules()
+        if db_rules:
+            rules_iter = [
+                (r.get("keywords") or [], r.get("label", ""),
+                 r.get("points", 1), r.get("send_alert", False))
+                for r in db_rules
+            ]
+    except Exception:
+        rules_iter = INTENT_RULES
+
+    for keywords, label, points, send_alert in rules_iter:
         for kw in keywords:
             if kw in text_lower:
                 if best is None or points > best["points"]:
