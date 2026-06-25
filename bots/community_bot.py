@@ -60,6 +60,7 @@ from database import (
     get_new_members,
     get_state,
     set_state,
+    crm_capture,
 )
 from services.ai import answer_trading_question
 from services.engagement import (
@@ -361,6 +362,11 @@ async def handle_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None
         elif cta_level == "medium":
             soft_cta = t("soft_cta_medium", lang)
 
+        # Auto-capture high-intent askers into the CRM (dedupes by telegram_id)
+        if intent["send_alert"]:
+            crm_capture(user.id, user.first_name or "", user.username or "",
+                        "telegram", intent["label"], min(90, intent["points"] * 30))
+
         # Send alert to EBI Potential Client Update group for HIGH intent
         if intent["send_alert"] and config.POTENTIAL_CLIENT_GROUP_ID:
             alert_text = format_intent_alert(
@@ -516,6 +522,7 @@ async def _notify_lead(bot, user, kind: str) -> None:
         telegram_id=user.id, username=user.username or "", first_name=user.first_name or "",
         question=f"[menu] {label}", intent_label=label, score=points,
     )
+    crm_capture(user.id, user.first_name or "", user.username or "", "telegram", label, 80 if kind == "book" else 60)
     if config.POTENTIAL_CLIENT_GROUP_ID:
         alert = format_intent_alert(
             user_id=user.id, username=user.username or "", first_name=user.first_name or "",
@@ -540,6 +547,8 @@ async def _capture_lead(bot, user, reply_text: str, kind: str) -> None:
         )
     except Exception as e:
         log.warning(f"Could not log captured lead: {e}")
+
+    crm_capture(user.id, user.first_name or "", user.username or "", "telegram", label, 85)
 
     display = f"@{user.username}" if user.username else (user.first_name or "Unknown")
     profile = f"tg://user?id={user.id}"

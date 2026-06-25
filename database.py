@@ -396,3 +396,51 @@ def increment_violations(telegram_id: int) -> int:
 
 def reset_violations(telegram_id: int) -> None:
     set_state(f"violations:{telegram_id}", 0)
+
+
+# ── CRM auto-capture ──────────────────────────────────────────────────────────
+# Create or merge a CRM lead from a Telegram interaction. De-dupes by telegram_id,
+# keeps the highest score, and logs an activity. Safe: never raises to the caller.
+
+def crm_capture(telegram_id: int, first_name: str = "", username: str = "",
+                source: str = "telegram", label: str = "", points: int = 0) -> Optional[int]:
+    try:
+        db = get_db()
+        existing = (
+            db.table("crm_leads").select("id,score")
+            .eq("telegram_id", telegram_id).limit(1).execute()
+        )
+        if existing.data:
+            lead = existing.data[0]
+            new_score = max(int(lead.get("score") or 0), int(points))
+            db.table("crm_leads").update({
+                "score": new_score,
+                "last_activity_at": datetime.now(timezone.utc).isoformat(),
+            }).eq("id", lead["id"]).execute()
+            db.table("crm_activities").insert({
+                "lead_id": lead["id"], "type": "signal",
+                "summary": f"Telegram: {label or source}", "actor": "telegram-bot",
+            }).execute()
+            return lead["id"]
+
+        res = db.table("crm_leads").insert({
+            "full_name": first_name or f"TG {telegram_id}",
+            "telegram_id": telegram_id,
+            "source": source,
+            "stage": "new", "status": "new",
+            "score": int(points),
+            "notes": (f"@{username}" if username else ""),
+            "dedupe_hash": f"tg:{telegram_id}",
+            "created_by": "telegram-bot",
+        }).execute()
+        lead_id = res.data[0]["id"] if res.data else None
+        if lead_id:
+            db.table("crm_activities").insert({
+                "lead_id": lead_id, "type": "created",
+                "summary": f"Lead auto-captured from Telegram: {label or source}",
+                "actor": "telegram-bot",
+            }).execute()
+        return lead_id
+    except Exception as e:
+        log.error(f"crm_capture failed: {e}")
+        return None

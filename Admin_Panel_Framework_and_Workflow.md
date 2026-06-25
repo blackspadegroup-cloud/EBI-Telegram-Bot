@@ -189,6 +189,10 @@ Separate from the live marketing site so it can never affect it. Cost: $0.
 - ✅ Panel CRM rebuilt: **Pipeline** (11-stage drag-and-drop board), **Leads** (inbox + add + import Telegram signals), **lead profile** (fields, notes, tags, tasks, activity timeline), **Tasks** (due-sorted, complete)
 - ✅ Verified live (insert/move/activity/cascade)
 - ✅ Management dashboard (landing page): KPI tiles, pipeline funnel, leads by source/owner, recent activity, community metrics
+- ✅ Auto lead capture: universal `ingest-lead` edge function (live) + Telegram auto-capture (`crm_capture`); auto-scoring + de-dupe built in
+- ⬜ Wire website masterclass form to the endpoint (Steve's web dev) — guide in `supabase/functions/ingest-lead/WEBSITE_SNIPPET.md`
+- ⬜ Facebook/IG/TikTok lead ads → endpoint via Zapier (Steve's ad accounts) — reminded for later
+- ⬜ KYC/document upload on lead profile (deferred by Steve)
 - ⬜ Phase 2 (gated on broker API): deposits/revenue, IB module, comms center, automation, support, marketing analytics — see design doc
 - ⬜ Reminder to Steve: confirm AIMS FX / MetaApi API access before Phase 2
 
