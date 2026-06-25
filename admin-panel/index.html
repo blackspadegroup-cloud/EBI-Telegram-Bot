@@ -37,7 +37,17 @@
   #login .box{width:360px;max-width:100%;background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:28px}
   /* app shell */
   #app{display:flex;min-height:100vh}
-  #side{width:200px;background:var(--panel);border-right:1px solid var(--border);padding:16px 12px;display:flex;flex-direction:column;gap:2px}
+  #side{width:200px;background:var(--panel);border-right:1px solid var(--border);padding:16px 12px;display:flex;flex-direction:column;gap:2px;position:sticky;top:0;height:100vh;overflow-y:auto;transition:width .12s}
+  #side i{font-style:normal;display:inline-block;width:18px;text-align:center}
+  #side .collapse{align-self:flex-end;background:transparent;border:none;color:var(--muted);font-size:18px;cursor:pointer;padding:2px 6px}
+  #side .bmini{display:none;text-align:center;font-size:20px;padding:6px 0;color:var(--gold)}
+  #side.collapsed{width:60px;padding:14px 6px}
+  #side.collapsed .lbl,#side.collapsed .bfull,#side.collapsed .meta{display:none}
+  #side.collapsed .bmini{display:block}
+  #side.collapsed .nav{justify-content:center;gap:0;padding:9px 0}
+  #side.collapsed .collapse{align-self:center}
+  #side.collapsed .who{justify-content:center}
+  select{font-family:inherit;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:6px 8px;font-size:13px}
   #side .brand{padding:4px 8px 16px}
   #side .nav{display:flex;align-items:center;gap:10px;padding:9px 11px;border-radius:8px;color:var(--muted);font-size:13px;border-left:3px solid transparent;cursor:pointer}
   #side .nav.active{background:var(--panel2);border-left-color:var(--gold);color:var(--gold-soft)}
@@ -98,27 +108,31 @@
 <!-- ───────────── APP ───────────── -->
 <div id="app" class="hidden">
   <nav id="side">
+    <button class="collapse" id="collapseBtn" aria-label="Collapse menu">≡</button>
     <div class="brand">
-      <div style="font-weight:500;letter-spacing:.5px">ELITE BY INFINITY</div>
-      <div class="gold" style="letter-spacing:3px;font-size:11px;margin-top:2px">道法术器 · admin</div>
+      <div class="bfull">
+        <div style="font-weight:500;letter-spacing:.5px">ELITE BY INFINITY</div>
+        <div class="gold" style="letter-spacing:3px;font-size:11px;margin-top:2px">道法术器 · admin</div>
+      </div>
+      <div class="bmini">道</div>
     </div>
-    <div class="nav active" data-view="content"><i>▣</i> Content</div>
-    <div class="nav" data-view="approvals"><i>✔</i> Approvals <span class="badge hidden" id="apprBadge">0</span></div>
-    <div class="nav" data-view="soon"><i>⚙</i> Settings</div>
-    <div class="nav" data-view="soon"><i>◎</i> Intent rules</div>
-    <div class="nav" data-view="soon"><i>?</i> FAQ</div>
-    <div class="nav" data-view="soon"><i>☷</i> CRM</div>
-    <div class="nav" data-view="soon"><i>➤</i> Sent log</div>
-    <div class="nav" data-view="soon"><i>▦</i> Education</div>
+    <div class="nav active" data-view="content"><i>▣</i><span class="lbl">Content</span></div>
+    <div class="nav" data-view="approvals"><i>✔</i><span class="lbl">Approvals</span><span class="badge hidden" id="apprBadge">0</span></div>
+    <div class="nav" data-view="settings"><i>⚙</i><span class="lbl">Settings</span></div>
+    <div class="nav" data-view="intent"><i>◎</i><span class="lbl">Intent rules</span></div>
+    <div class="nav" data-view="faq"><i>?</i><span class="lbl">FAQ</span></div>
+    <div class="nav" data-view="crm"><i>☷</i><span class="lbl">CRM</span></div>
+    <div class="nav" data-view="sentlog"><i>➤</i><span class="lbl">Sent log</span></div>
+    <div class="nav" data-view="education"><i>▦</i><span class="lbl">Education</span></div>
     <div class="who">
       <span class="ring" id="whoInitial">?</span>
-      <div style="flex:1">
+      <div class="meta" style="flex:1">
         <div id="whoName" style="font-size:12px"></div>
         <div id="whoRole" class="gold" style="font-size:11px"></div>
       </div>
     </div>
-    <button class="ghost" id="themeToggle" style="margin-top:10px">Day / night</button>
-    <button class="ghost" id="signOut" style="margin-top:6px">Sign out</button>
+    <button class="ghost" id="themeToggle" style="margin-top:10px"><i>☾</i><span class="lbl"> Day / night</span></button>
+    <button class="ghost" id="signOut" style="margin-top:6px"><i>⎋</i><span class="lbl"> Sign out</span></button>
   </nav>
 
   <main id="main">
@@ -139,6 +153,7 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 let ME = { email:null, role:null, name:null };
 const $ = s => document.querySelector(s);
 const esc = s => (s||"").replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const escA = s => esc(s).replace(/"/g,'&quot;');
 
 // ── Theme (persisted) ──
 function applyTheme(t){ document.documentElement.setAttribute('data-theme', t); try{ localStorage.setItem('ebi_theme', t);}catch(e){} }
@@ -146,6 +161,11 @@ function toggleTheme(){ applyTheme(document.documentElement.getAttribute('data-t
 try{ const saved = localStorage.getItem('ebi_theme'); if(saved) applyTheme(saved); }catch(e){}
 $('#themeToggle').onclick = toggleTheme;
 $('#themeToggleLogin').onclick = toggleTheme;
+
+// ── Collapsible sidebar (persisted) ──
+function setCollapsed(c){ $('#side').classList.toggle('collapsed', c); try{ localStorage.setItem('ebi_collapsed', c?'1':'0'); }catch(e){} }
+$('#collapseBtn').onclick = () => setCollapsed(!$('#side').classList.contains('collapsed'));
+try{ if(localStorage.getItem('ebi_collapsed')==='1') setCollapsed(true); }catch(e){}
 
 // ── Auth ──
 const REDIRECT = location.href.split('#')[0].split('?')[0];
@@ -261,10 +281,205 @@ function bindNav(){
 }
 
 function render(view){
-  if(view==='content'){ $('#viewTitle').textContent='Content'; renderContent(); }
-  else if(view==='approvals'){ $('#viewTitle').textContent='Approvals'; renderApprovals(); }
-  else { $('#viewTitle').textContent='Coming next'; $('#view').innerHTML =
-    '<div class="card"><p class="muted">This section is part of the next build slice. Content editing and the approval queue are live now — Settings, Intent rules, FAQ, CRM, Sent log and Education arrive next.</p></div>'; }
+  const titles={content:'Content',approvals:'Approvals',settings:'Settings',intent:'Intent rules',faq:'FAQ',crm:'CRM',sentlog:'Sent log',education:'Education'};
+  $('#viewTitle').textContent = titles[view]||'';
+  ({content:renderContent, approvals:renderApprovals, settings:renderSettings, intent:renderIntent,
+    faq:renderFaq, crm:renderCrm, sentlog:renderSentLog, education:renderEducation}[view]||renderContent)();
+}
+
+// ── Settings (admin writes; editors read-only) ──
+async function renderSettings(){
+  const isAdmin = ME.role==='admin';
+  $('#view').innerHTML='<p class="muted">Loading settings…</p>';
+  const { data, error } = await sb.from('bot_settings').select('key,value,description').order('key');
+  if(error){ $('#view').innerHTML='<div class="card">Error: '+esc(error.message)+'</div>'; return; }
+  let html='<p class="muted" style="margin-top:0">'+(isAdmin?'Edit a value and Save. Use true/false for on-off switches, plain numbers for counts.':'Read-only — only the admin can change settings.')+'</p>';
+  (data||[]).forEach(s=>{
+    const v = (typeof s.value==='string') ? s.value : JSON.stringify(s.value);
+    html+='<div class="card"><div style="font-weight:500">'+esc(s.description||s.key)+'</div>'+
+      '<div class="muted" style="font-size:11px;margin-bottom:6px">'+esc(s.key)+'</div>'+
+      '<input data-sk="'+escA(s.key)+'" value="'+escA(v)+'"'+(isAdmin?'':' disabled')+' />'+
+      (isAdmin?'<div style="margin-top:8px"><button class="primary" data-saves="'+escA(s.key)+'">Save</button></div>':'')+
+      '</div>';
+  });
+  $('#view').innerHTML=html;
+  document.querySelectorAll('[data-saves]').forEach(b=> b.onclick=()=>saveSetting(b.dataset.saves,b));
+}
+async function saveSetting(key,btn){
+  const inp=document.querySelector('[data-sk="'+CSS.escape(key)+'"]');
+  let val; try{ val=JSON.parse(inp.value); }catch(e){ val=inp.value; }
+  btn.disabled=true;
+  const { error }=await sb.from('bot_settings').update({value:val,updated_by:ME.email,updated_at:new Date().toISOString()}).eq('key',key);
+  btn.disabled=false; btn.textContent= error?('Failed: '+error.message):'Saved ✓';
+  if(!error) logAudit('update_setting',key);
+}
+
+// ── Intent rules (admin only) ──
+async function renderIntent(){
+  const isAdmin=ME.role==='admin';
+  $('#view').innerHTML='<p class="muted">Loading intent rules…</p>';
+  const { data, error }=await sb.from('bot_intent_rules').select('*').order('sort_order');
+  if(error){ $('#view').innerHTML='<div class="card">Error: '+esc(error.message)+'</div>'; return; }
+  let html='<p class="muted" style="margin-top:0">'+(isAdmin?'Keywords that flag a member message as a lead. Points 1–3 (higher = hotter). "Alert team" pings the Potential Client group.':'Read-only — only the admin can change intent rules.')+'</p>';
+  (data||[]).forEach(r=>{
+    html+='<div class="card">'+
+      '<div class="row"><input data-ik="label" data-id="'+r.id+'" value="'+escA(r.label)+'"'+(isAdmin?'':' disabled')+' style="max-width:62%"/>'+
+      '<span class="pill '+(r.active?'ok':'warn')+'">'+(r.active?'active':'off')+'</span></div>'+
+      '<div class="lab">Keywords (comma-separated)</div>'+
+      '<textarea data-ik="keywords" data-id="'+r.id+'"'+(isAdmin?'':' disabled')+'>'+esc((r.keywords||[]).join(', '))+'</textarea>'+
+      '<div class="ctrls" style="margin-top:8px"><span class="muted" style="font-size:12px">Points <input data-ik="points" data-id="'+r.id+'" value="'+r.points+'" style="width:54px;display:inline-block"'+(isAdmin?'':' disabled')+'/></span>'+
+      '<label class="muted" style="font-size:12px">Alert team <input type="checkbox" data-ik="send_alert" data-id="'+r.id+'" '+(r.send_alert?'checked':'')+(isAdmin?'':' disabled')+'/></label>'+
+      '<label class="muted" style="font-size:12px">Active <input type="checkbox" data-ik="active" data-id="'+r.id+'" '+(r.active?'checked':'')+(isAdmin?'':' disabled')+'/></label></div>'+
+      (isAdmin?'<div style="margin-top:8px"><button class="primary" data-savei="'+r.id+'">Save</button></div>':'')+
+      '</div>';
+  });
+  if(isAdmin) html+='<button class="ghost" id="addIntent">+ Add rule</button>';
+  $('#view').innerHTML=html;
+  document.querySelectorAll('[data-savei]').forEach(b=> b.onclick=()=>saveIntent(b.dataset.savei,b));
+  if($('#addIntent')) $('#addIntent').onclick=addIntentRule;
+}
+function ifield(id,name){ return document.querySelector('[data-ik="'+name+'"][data-id="'+id+'"]'); }
+async function saveIntent(id,btn){
+  const patch={ label:ifield(id,'label').value.trim(),
+    keywords:ifield(id,'keywords').value.split(',').map(s=>s.trim()).filter(Boolean),
+    points:parseInt(ifield(id,'points').value)||1,
+    send_alert:ifield(id,'send_alert').checked, active:ifield(id,'active').checked,
+    updated_by:ME.email, updated_at:new Date().toISOString() };
+  btn.disabled=true;
+  const { error }=await sb.from('bot_intent_rules').update(patch).eq('id',id);
+  btn.disabled=false; btn.textContent= error?('Failed: '+error.message):'Saved ✓';
+  if(!error) logAudit('update_intent',String(id));
+}
+async function addIntentRule(){
+  const { error }=await sb.from('bot_intent_rules').insert({label:'New rule',keywords:['keyword'],points:1,send_alert:false,active:false,sort_order:999,updated_by:ME.email});
+  if(error){ alert(error.message); return; } renderIntent();
+}
+
+// ── FAQ (editors submit; admin approves) ──
+async function renderFaq(){
+  const isAdmin=ME.role==='admin';
+  $('#view').innerHTML='<p class="muted">Loading FAQ…</p>';
+  const appr=await sb.from('bot_faq_versions').select('*').eq('status','approved').order('version',{ascending:false});
+  const pend=isAdmin?(await sb.from('bot_faq_versions').select('*').eq('status','pending').order('created_at')):{data:[]};
+  let html='<div class="card"><div style="font-weight:500;margin-bottom:6px">Add an FAQ</div>'+
+    '<div class="lab">Question / topic</div><input id="faqQ" placeholder="e.g. minimum deposit"/>'+
+    '<div class="lab">Trigger tags (comma-separated keywords)</div><input id="faqTags" placeholder="deposit, minimum, how much"/>'+
+    '<div class="lab">Answer (English)</div><textarea id="faqEn"></textarea>'+
+    '<div class="lab">回答 (中文)</div><textarea id="faqZh"></textarea>'+
+    '<div style="margin-top:8px"><button class="primary" id="faqSubmit">Submit for review</button></div>'+
+    '<p id="faqMsg" class="muted" style="font-size:12px;margin-top:8px"></p></div>';
+  if(isAdmin && pend.data && pend.data.length){
+    html+='<div class="seg">PENDING APPROVAL</div>';
+    pend.data.forEach(f=>{ html+='<div class="card"><div class="row"><span style="font-weight:500">'+esc(f.question)+' <span class="muted">— by '+esc(f.created_by||'?')+'</span></span><span class="pill warn">pending</span></div>'+
+      '<div class="muted" style="font-size:12px;margin:6px 0">'+esc(f.answer_en||'')+'</div>'+
+      '<div class="ctrls"><button class="primary" data-fapp="'+f.id+'">Approve</button><button class="danger" data-frej="'+f.id+'">Reject</button></div></div>'; });
+  }
+  html+='<div class="seg">LIVE FAQ</div>';
+  if(!appr.data||!appr.data.length) html+='<div class="card"><p class="muted">No approved FAQ yet.</p></div>';
+  (appr.data||[]).forEach(f=>{ html+='<div class="card"><div class="row"><span style="font-weight:500">'+esc(f.question)+'</span><span class="pill ok">live</span></div>'+
+    '<div class="muted" style="font-size:12px;margin-top:6px">'+esc(f.answer_en||'')+'</div></div>'; });
+  $('#view').innerHTML=html;
+  $('#faqSubmit').onclick=submitFaq;
+  document.querySelectorAll('[data-fapp]').forEach(b=>b.onclick=()=>decideFaq(b.dataset.fapp,'approved'));
+  document.querySelectorAll('[data-frej]').forEach(b=>b.onclick=()=>decideFaq(b.dataset.frej,'rejected'));
+}
+async function submitFaq(){
+  const q=$('#faqQ').value.trim(), tags=$('#faqTags').value.split(',').map(s=>s.trim()).filter(Boolean);
+  const en=$('#faqEn').value.trim(), zh=$('#faqZh').value.trim();
+  if(!q||!en){ $('#faqMsg').textContent='Question and English answer are required.'; return; }
+  const { error }=await sb.from('bot_faq_versions').insert({question:q,answer_en:en,answer_zh:zh,tags,status:'pending',version:1,created_by:ME.email});
+  $('#faqMsg').textContent= error?('Error: '+error.message):'Submitted for review ✓';
+  if(!error) logAudit('submit_faq',q);
+}
+async function decideFaq(id,status){
+  const { error }=await sb.from('bot_faq_versions').update({status,reviewed_by:ME.email}).eq('id',id);
+  if(error){ alert(error.message); return; } logAudit('faq_'+status,String(id)); renderFaq();
+}
+
+// ── CRM (both roles operate) ──
+async function renderCrm(){
+  $('#view').innerHTML='<p class="muted">Loading CRM…</p>';
+  const stages=['New','Engaged','Hot','Contacted','Converted'];
+  const cl=await sb.from('bot_clients').select('*').order('updated_at',{ascending:false});
+  const ev=await sb.from('bot_intent_events').select('telegram_id,username,first_name,intent_label,created_at').order('created_at',{ascending:false}).limit(15);
+  const counts={}; stages.forEach(s=>counts[s]=0); (cl.data||[]).forEach(c=>{counts[c.stage]=(counts[c.stage]||0)+1;});
+  let html='<div class="card"><div class="row">'+stages.map(s=>'<span class="muted" style="font-size:12px">'+s+': <b style="color:var(--text)">'+counts[s]+'</b></span>').join('')+'</div></div>';
+  html+='<div class="seg">CLIENTS</div>';
+  if(!cl.data||!cl.data.length) html+='<div class="card"><p class="muted">No clients yet — add leads from the signals below.</p></div>';
+  (cl.data||[]).forEach(c=>{ html+='<div class="card"><div class="row"><span style="font-weight:500">'+esc(c.first_name||('id '+c.telegram_id))+(c.username?(' (@'+esc(c.username)+')'):'')+'</span>'+
+    '<select data-cs="'+c.telegram_id+'">'+stages.map(s=>'<option'+(s===c.stage?' selected':'')+'>'+s+'</option>').join('')+'</select></div>'+
+    '<div class="lab">Owner</div><input data-co="'+c.telegram_id+'" value="'+escA(c.owner||'')+'"/>'+
+    '<div class="lab">Notes</div><textarea data-cn="'+c.telegram_id+'">'+esc(c.notes||'')+'</textarea>'+
+    '<div style="margin-top:8px"><button class="primary" data-csave="'+c.telegram_id+'">Save</button></div></div>'; });
+  html+='<div class="seg">RECENT SIGNALS</div>';
+  if(!ev.data||!ev.data.length) html+='<div class="card"><p class="muted">No recent intent signals.</p></div>';
+  (ev.data||[]).forEach(e=>{ html+='<div class="card"><div class="row"><span>'+esc(e.first_name||'?')+(e.username?(' (@'+esc(e.username)+')'):'')+' — <span class="muted">'+esc(e.intent_label||'')+'</span></span>'+
+    '<button class="ghost" data-addid="'+e.telegram_id+'" data-addn="'+escA(e.first_name||'')+'" data-addu="'+escA(e.username||'')+'">+ Add to CRM</button></div></div>'; });
+  $('#view').innerHTML=html;
+  document.querySelectorAll('[data-csave]').forEach(b=>b.onclick=()=>saveClient(b.dataset.csave,b));
+  document.querySelectorAll('[data-addid]').forEach(b=>b.onclick=()=>addClient(b.dataset.addid,b.dataset.addn,b.dataset.addu));
+}
+async function saveClient(id,btn){
+  const stage=document.querySelector('[data-cs="'+id+'"]').value;
+  const owner=document.querySelector('[data-co="'+id+'"]').value;
+  const notes=document.querySelector('[data-cn="'+id+'"]').value;
+  btn.disabled=true;
+  const { error }=await sb.from('bot_clients').update({stage,owner,notes,updated_at:new Date().toISOString()}).eq('telegram_id',id);
+  btn.disabled=false; btn.textContent= error?('Failed: '+error.message):'Saved ✓';
+}
+async function addClient(id,name,username){
+  const { error }=await sb.from('bot_clients').upsert({telegram_id:id,first_name:name,username,stage:'New',updated_at:new Date().toISOString()},{onConflict:'telegram_id'});
+  if(error){ alert(error.message); return; } renderCrm();
+}
+
+// ── Sent log (read-only) ──
+async function renderSentLog(){
+  $('#view').innerHTML='<p class="muted">Loading sent log…</p>';
+  const { data, error }=await sb.from('telegram_messages').select('ts,direction,text').like('direction','out:%').order('ts',{ascending:false}).limit(50);
+  if(error){ $('#view').innerHTML='<div class="card">Error: '+esc(error.message)+'</div>'; return; }
+  let html='<p class="muted" style="margin-top:0">The last 50 messages the bots sent (read-only).</p>';
+  if(!data||!data.length) html+='<div class="card"><p class="muted">No sent messages logged yet.</p></div>';
+  (data||[]).forEach(m=>{ const p=(m.direction||'').split(':'); const bot=p[1]||'?', type=p[2]||'';
+    let t=m.ts; try{ t=new Date(m.ts).toLocaleString(); }catch(e){}
+    html+='<div class="card"><div class="row"><span class="muted" style="font-size:12px">'+esc(bot)+' · '+esc(type)+'</span><span class="muted" style="font-size:11px">'+esc(t)+'</span></div>'+
+      '<div style="font-size:13px;margin-top:6px">'+esc((m.text||'').slice(0,300))+'</div></div>'; });
+  $('#view').innerHTML=html;
+}
+
+// ── Education (editors fill + submit; admin publishes) ──
+async function renderEducation(){
+  const isAdmin=ME.role==='admin';
+  $('#view').innerHTML='<p class="muted">Loading course…</p>';
+  const { data, error }=await sb.from('bot_edu_lessons').select('*').order('day_number');
+  if(error){ $('#view').innerHTML='<div class="card">Error: '+esc(error.message)+'</div>'; return; }
+  let html='<p class="muted" style="margin-top:0">30-day course. Editors fill content and Submit; '+(isAdmin?'you Publish a day to make it live to learners.':'Steve publishes each day.')+'</p>';
+  (data||[]).forEach(d=>{
+    const pill = d.status==='published'?'ok':((d.status==='pending')?'warn':'');
+    html+='<div class="card"><div class="row"><span style="font-weight:500">Day '+d.day_number+' — '+esc(d.title_en||'(untitled)')+'</span><span class="pill '+pill+'">'+esc(d.status)+'</span></div>'+
+      '<div class="lab">Title (EN)</div><input data-ek="title_en" data-d="'+d.id+'" value="'+escA(d.title_en||'')+'"/>'+
+      '<div class="lab">标题 (中文)</div><input data-ek="title_zh" data-d="'+d.id+'" value="'+escA(d.title_zh||'')+'"/>'+
+      '<div class="lab">Lesson (EN)</div><textarea data-ek="body_en" data-d="'+d.id+'">'+esc(d.body_en||'')+'</textarea>'+
+      '<div class="lab">课程 (中文)</div><textarea data-ek="body_zh" data-d="'+d.id+'">'+esc(d.body_zh||'')+'</textarea>'+
+      '<div class="ctrls" style="margin-top:8px"><button class="primary" data-edusub="'+d.id+'">Save &amp; submit</button>'+
+      (isAdmin?'<button class="ghost" data-edupub="'+d.id+'">Publish</button>':'')+'</div>'+
+      '<p class="muted" data-edumsg="'+d.id+'" style="font-size:12px;margin-top:6px"></p></div>';
+  });
+  $('#view').innerHTML=html;
+  document.querySelectorAll('[data-edusub]').forEach(b=>b.onclick=()=>saveEdu(b.dataset.edusub,'pending',b));
+  document.querySelectorAll('[data-edupub]').forEach(b=>b.onclick=()=>saveEdu(b.dataset.edupub,'published',b));
+}
+function efield(id,name){ return document.querySelector('[data-ek="'+name+'"][data-d="'+id+'"]'); }
+async function saveEdu(id,status,btn){
+  const patch={ title_en:efield(id,'title_en').value, title_zh:efield(id,'title_zh').value,
+    body_en:efield(id,'body_en').value, body_zh:efield(id,'body_zh').value,
+    status, updated_by:ME.email, updated_at:new Date().toISOString() };
+  btn.disabled=true;
+  const { error }=await sb.from('bot_edu_lessons').update(patch).eq('id',id);
+  btn.disabled=false;
+  const m=document.querySelector('[data-edumsg="'+id+'"]');
+  if(error){ m.textContent='Failed: '+error.message; return; }
+  m.textContent = status==='published'?'Published ✓ — live to learners':'Saved & submitted ✓';
+  logAudit('edu_'+status,String(id));
 }
 
 // ── Content editor ──

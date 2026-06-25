@@ -167,11 +167,13 @@ Separate from the live marketing site so it can never affect it. Cost: $0.
 - ✅ Editor UI: content editor (draft → submit) — first slice
 - ✅ Admin UI: approval queue (approve / reject)
 - ✅ Day/night theme toggle
-- ⬜ Remaining UIs: settings, intent rules, FAQ, CRM, sent log, education grid
-- ⬜ Markdown safety: validate/escape content on save
+- ✅ Remaining UIs built: Settings, Intent rules, FAQ (submit→approve), CRM (pipeline + signals), Sent log, Education grid (30 days)
+- ✅ Sticky + collapsible sidebar (icon-only collapse, persisted)
+- ✅ Deployed to Cloudflare Pages + Email auth enabled + admin login verified
+- ⬜ Markdown safety: input escaping done; deeper validation polish pending
 - ⬜ Submit/approve notifications (Telegram DM to Steve)
-- ⬜ Deploy to Cloudflare Pages (free) + point `admin.elitesbyinfinity.com` DNS
-- ⬜ Enable Email auth in Supabase + add team editor emails to `bot_panel_users`
+- ⬜ Add team editor emails to `bot_panel_users` (when Steve is ready)
+- ⬜ Go-live DNS: point `admin.elitesbyinfinity.com` (currently on the pages.dev URL)
 
 ### Stage 3 — EBI Education Bot (30-day course)
 - ⬜ New bot via BotFather + token in Railway
