@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>EBI Platform — Live Status</title>
+<style>
+  :root{ color-scheme: light; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; background:#FAF7EF; color:#1A1A2E; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; font-size:14px; line-height:1.5; padding:20px; }
+  h1{ font-size:22px; font-weight:600; margin:0; }
+  .sub{ color:#B8860B; letter-spacing:3px; font-size:12px; margin-top:2px; }
+  .note{ color:#6b6b5e; font-size:12px; margin:4px 0 18px; }
+  .grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-bottom:22px; }
+  .tile{ background:#fff; border:1px solid #E6DFC9; border-radius:10px; padding:13px 14px; }
+  .tile .k{ font-size:12px; color:#6b6b5e; }
+  .tile .v{ font-size:26px; font-weight:600; color:#1A1A2E; margin-top:2px; }
+  .tile .v.gold{ color:#B8860B; }
+  h2{ font-size:15px; font-weight:600; margin:20px 0 10px; border-bottom:2px solid #E6DFC9; padding-bottom:6px; }
+  .cols{ display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  ul{ margin:0; padding-left:0; list-style:none; }
+  li{ font-size:13px; margin-bottom:7px; }
+  .done::before{ content:"\2713"; color:#2f7d4f; font-weight:700; margin-right:8px; }
+  .todo::before{ content:"\25CB"; color:#B8860B; margin-right:9px; }
+  .err{ color:#a33; }
+  @media(max-width:560px){ .cols{ grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+  <h1>Elite By Infinity — Platform Status</h1>
+  <div class="sub">道法术器 · live</div>
+  <div class="note">Live figures from your database. Press <b>Reload</b> (top of this panel) to refresh.</div>
+
+  <div class="grid" id="tiles">
+    <div class="tile"><div class="k">Leads</div><div class="v" id="m-leads">…</div></div>
+    <div class="tile"><div class="k">Funded / active</div><div class="v gold" id="m-funded">…</div></div>
+    <div class="tile"><div class="k">Open tasks</div><div class="v" id="m-tasks">…</div></div>
+    <div class="tile"><div class="k">Pending approvals</div><div class="v" id="m-pending">…</div></div>
+    <div class="tile"><div class="k">Course days live</div><div class="v" id="m-edu">…</div></div>
+    <div class="tile"><div class="k">Community members</div><div class="v" id="m-members">…</div></div>
+  </div>
+
+  <h2>Built &amp; live</h2>
+  <div class="cols">
+    <ul>
+      <li class="done">Analytic bot — Gold/US-macro, 6&times;/day breaking-news digest</li>
+      <li class="done">Community bot — welcome, onboarding, AI Q&amp;A, intent, moderation</li>
+      <li class="done">Admin panel — content + approval workflow (you approve all)</li>
+      <li class="done">Admin panel — settings, intent rules, FAQ, sent log, education authoring</li>
+    </ul>
+    <ul>
+      <li class="done">CRM Phase 1 — 11-stage pipeline, lead profiles, tasks, dashboard</li>
+      <li class="done">Auto lead capture — universal endpoint + Telegram (scoring + dedupe)</li>
+      <li class="done">Database security — row-level security + audit + roles</li>
+      <li class="done">Bilingual throughout — English + 中文</li>
+    </ul>
+  </div>
+
+  <h2>Next / pending</h2>
+  <div class="cols">
+    <ul>
+      <li class="todo">Wire website masterclass form to the capture endpoint</li>
+      <li class="todo">Facebook / Instagram / TikTok lead ads (your ad accounts)</li>
+      <li class="todo">Comms log + follow-up automation</li>
+      <li class="todo">Support tickets + SLA</li>
+    </ul>
+    <ul>
+      <li class="todo">Marketing analytics &amp; IB referral tree</li>
+      <li class="todo">KYC / document upload</li>
+      <li class="todo">Deposits &amp; revenue + IB commissions (needs broker data)</li>
+      <li class="todo">Phase 3 — client portal, AI, mobile</li>
+    </ul>
+  </div>
+
+<script>
+function parseRows(r){
+  try{ if(r && r.structuredContent) return r.structuredContent; }catch(e){}
+  var txt = (r && r.content && r.content[0] && r.content[0].text) || "";
+  try{ return JSON.parse(txt); }catch(e){}
+  var m = txt.match(/\[[\s\S]*\]/);
+  if(m){ try{ return JSON.parse(m[0]); }catch(e){} }
+  return null;
+}
+function setAll(val){ ["m-leads","m-funded","m-tasks","m-pending","m-edu","m-members"].forEach(function(id){ document.getElementById(id).textContent = val; }); }
+async function load(){
+  try{
+    var q = "select (select count(*) from crm_leads) as leads,"
+      + "(select count(*) from crm_leads where stage in ('first_deposit','active','reactivated')) as funded,"
+      + "(select count(*) from crm_tasks where status='open') as open_tasks,"
+      + "((select count(*) from bot_content_versions where status='pending')+(select count(*) from bot_faq_versions where status='pending')) as pending,"
+      + "(select count(*) from bot_edu_lessons where status='published') as edu,"
+      + "(select count(*) from telegram_subscribers) as members";
+    var r = await window.cowork.callMcpTool("mcp__18c0c6ef-685f-40ee-882c-7a61c95e2611__execute_sql", { project_id:"jnyzkukhrwgiaqqtwfvv", query:q });
+    var rows = parseRows(r);
+    if(!rows || !rows[0]){ setAll("—"); return; }
+    var d = rows[0];
+    document.getElementById("m-leads").textContent = d.leads ?? "—";
+    document.getElementById("m-funded").textContent = d.funded ?? "—";
+    document.getElementById("m-tasks").textContent = d.open_tasks ?? "—";
+    document.getElementById("m-pending").textContent = d.pending ?? "—";
+    document.getElementById("m-edu").textContent = d.edu ?? "—";
+    document.getElementById("m-members").textContent = d.members ?? "—";
+  }catch(e){ setAll("—"); }
+}
+load();
+</script>
+</body>
+</html>
