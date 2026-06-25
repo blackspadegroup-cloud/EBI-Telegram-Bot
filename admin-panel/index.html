@@ -48,6 +48,13 @@
   #side.collapsed .collapse{align-self:center}
   #side.collapsed .who{justify-content:center}
   select{font-family:inherit;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:6px 8px;font-size:13px}
+  .crmtabs{display:flex;gap:6px;margin-bottom:14px}
+  .crmtab{padding:6px 13px;border:1px solid var(--border);border-radius:8px;font-size:13px;color:var(--muted);cursor:pointer}
+  .crmtab.on{background:var(--panel2);color:var(--gold-soft);border-color:var(--gold)}
+  .board{display:flex;gap:10px;overflow-x:auto;padding-bottom:10px}
+  .col{min-width:190px;width:190px;flex:0 0 auto;background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:8px}
+  .col.drop{outline:2px dashed var(--gold);outline-offset:-2px}
+  .lcard{background:var(--bg);border:1px solid var(--border);border-left:3px solid var(--gold);border-radius:0 8px 8px 0;padding:8px;margin-bottom:7px;cursor:grab}
   #side .brand{padding:4px 8px 16px}
   #side .nav{display:flex;align-items:center;gap:10px;padding:9px 11px;border-radius:8px;color:var(--muted);font-size:13px;border-left:3px solid transparent;cursor:pointer}
   #side .nav.active{background:var(--panel2);border-left-color:var(--gold);color:var(--gold-soft)}
@@ -396,40 +403,176 @@ async function decideFaq(id,status){
   if(error){ alert(error.message); return; } logAudit('faq_'+status,String(id)); renderFaq();
 }
 
-// ── CRM (both roles operate) ──
+// ── CRM Phase 1: Pipeline · Leads · Tasks ──
+let CRM_TAB='pipeline';
+let CRM_STAGES=[];
 async function renderCrm(){
   $('#view').innerHTML='<p class="muted">Loading CRM…</p>';
-  const stages=['New','Engaged','Hot','Contacted','Converted'];
-  const cl=await sb.from('bot_clients').select('*').order('updated_at',{ascending:false});
-  const ev=await sb.from('bot_intent_events').select('telegram_id,username,first_name,intent_label,created_at').order('created_at',{ascending:false}).limit(15);
-  const counts={}; stages.forEach(s=>counts[s]=0); (cl.data||[]).forEach(c=>{counts[c.stage]=(counts[c.stage]||0)+1;});
-  let html='<div class="card"><div class="row">'+stages.map(s=>'<span class="muted" style="font-size:12px">'+s+': <b style="color:var(--text)">'+counts[s]+'</b></span>').join('')+'</div></div>';
-  html+='<div class="seg">CLIENTS</div>';
-  if(!cl.data||!cl.data.length) html+='<div class="card"><p class="muted">No clients yet — add leads from the signals below.</p></div>';
-  (cl.data||[]).forEach(c=>{ html+='<div class="card"><div class="row"><span style="font-weight:500">'+esc(c.first_name||('id '+c.telegram_id))+(c.username?(' (@'+esc(c.username)+')'):'')+'</span>'+
-    '<select data-cs="'+c.telegram_id+'">'+stages.map(s=>'<option'+(s===c.stage?' selected':'')+'>'+s+'</option>').join('')+'</select></div>'+
-    '<div class="lab">Owner</div><input data-co="'+c.telegram_id+'" value="'+escA(c.owner||'')+'"/>'+
-    '<div class="lab">Notes</div><textarea data-cn="'+c.telegram_id+'">'+esc(c.notes||'')+'</textarea>'+
-    '<div style="margin-top:8px"><button class="primary" data-csave="'+c.telegram_id+'">Save</button></div></div>'; });
-  html+='<div class="seg">RECENT SIGNALS</div>';
-  if(!ev.data||!ev.data.length) html+='<div class="card"><p class="muted">No recent intent signals.</p></div>';
-  (ev.data||[]).forEach(e=>{ html+='<div class="card"><div class="row"><span>'+esc(e.first_name||'?')+(e.username?(' (@'+esc(e.username)+')'):'')+' — <span class="muted">'+esc(e.intent_label||'')+'</span></span>'+
-    '<button class="ghost" data-addid="'+e.telegram_id+'" data-addn="'+escA(e.first_name||'')+'" data-addu="'+escA(e.username||'')+'">+ Add to CRM</button></div></div>'; });
+  if(!CRM_STAGES.length){
+    const { data }=await sb.from('crm_pipeline_stages').select('*').order('sort_order');
+    CRM_STAGES=data||[];
+  }
+  const tabs=[['pipeline','Pipeline'],['leads','Leads'],['tasks','Tasks']];
+  let bar='<div class="crmtabs">'+tabs.map(t=>'<span class="crmtab'+(CRM_TAB===t[0]?' on':'')+'" data-crmtab="'+t[0]+'">'+t[1]+'</span>').join('')+'</div>';
+  $('#view').innerHTML=bar+'<div id="crmbody"></div>';
+  document.querySelectorAll('[data-crmtab]').forEach(el=> el.onclick=()=>{ CRM_TAB=el.dataset.crmtab; renderCrm(); });
+  if(CRM_TAB==='pipeline') crmPipeline();
+  else if(CRM_TAB==='leads') crmLeads();
+  else crmTasks();
+}
+
+async function crmPipeline(){
+  const body=$('#crmbody'); body.innerHTML='<p class="muted">Loading pipeline…</p>';
+  const { data, error }=await sb.from('crm_leads').select('id,full_name,country,source,score,stage,owner').order('last_activity_at',{ascending:false});
+  if(error){ body.innerHTML='<div class="card">Error: '+esc(error.message)+'</div>'; return; }
+  const byStage={}; CRM_STAGES.forEach(s=>byStage[s.key]=[]);
+  (data||[]).forEach(l=>{ (byStage[l.stage]||(byStage[l.stage]=[])).push(l); });
+  let html='<div class="board">';
+  CRM_STAGES.forEach(s=>{
+    html+='<div class="col" data-stage="'+s.key+'"><div style="font-size:12px;color:var(--gold-soft);margin-bottom:8px">'+esc(s.label)+' · '+(byStage[s.key]||[]).length+'</div>';
+    (byStage[s.key]||[]).forEach(l=>{ html+='<div class="lcard" draggable="true" data-lead="'+l.id+'">'+
+      '<div style="font-size:12px;color:var(--text)">'+esc(l.full_name||('Lead #'+l.id))+'</div>'+
+      '<div style="font-size:10px;color:var(--muted)">'+esc(l.source||'—')+' · '+l.score+(l.owner?(' · '+esc((l.owner||'').split('@')[0])):'')+'</div></div>'; });
+    html+='</div>';
+  });
+  html+='</div><p class="muted" style="font-size:12px;margin-top:6px">Drag a card to move stage · click to open.</p>';
+  body.innerHTML=html;
+  let dragId=null;
+  document.querySelectorAll('.lcard').forEach(c=>{
+    c.addEventListener('dragstart',()=>{ dragId=c.dataset.lead; });
+    c.addEventListener('click',()=> openLead(c.dataset.lead));
+  });
+  document.querySelectorAll('.col').forEach(col=>{
+    col.addEventListener('dragover',e=>{ e.preventDefault(); col.classList.add('drop'); });
+    col.addEventListener('dragleave',()=> col.classList.remove('drop'));
+    col.addEventListener('drop',async e=>{ e.preventDefault(); col.classList.remove('drop'); if(dragId){ await moveLead(dragId,col.dataset.stage); dragId=null; } });
+  });
+}
+async function moveLead(id,toStage){
+  const { data:cur }=await sb.from('crm_leads').select('stage').eq('id',id).maybeSingle();
+  const from=cur?cur.stage:null; if(from===toStage) return;
+  const { error }=await sb.from('crm_leads').update({stage:toStage,last_activity_at:new Date().toISOString()}).eq('id',id);
+  if(error){ alert(error.message); return; }
+  await sb.from('crm_lead_history').insert({lead_id:id,from_stage:from,to_stage:toStage,actor:ME.email});
+  await sb.from('crm_activities').insert({lead_id:id,type:'stage',summary:'Moved '+from+' → '+toStage,actor:ME.email});
+  crmPipeline();
+}
+
+async function crmLeads(){
+  const body=$('#crmbody'); body.innerHTML='<p class="muted">Loading leads…</p>';
+  const { data, error }=await sb.from('crm_leads').select('*').order('created_at',{ascending:false}).limit(200);
+  if(error){ body.innerHTML='<div class="card">Error: '+esc(error.message)+'</div>'; return; }
+  const srcs=['web form','meta','tiktok','instagram','telegram','whatsapp','referral','webinar','manual'];
+  let html='<div class="card"><div style="font-weight:500;margin-bottom:6px">Add a lead</div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">'+
+    '<input id="nlName" placeholder="Full name"/><input id="nlPhone" placeholder="Phone / WhatsApp"/>'+
+    '<input id="nlEmail" placeholder="Email"/><input id="nlCountry" placeholder="Country"/>'+
+    '<select id="nlSource"><option value="">Source…</option>'+srcs.map(s=>'<option>'+s+'</option>').join('')+'</select>'+
+    '<input id="nlScore" type="number" placeholder="Score 0-100"/></div>'+
+    '<div style="margin-top:8px"><button class="primary" id="nlAdd">Add lead</button> <span id="nlMsg" class="muted" style="font-size:12px"></span></div></div>'+
+    '<div style="margin:6px 0 12px"><button class="ghost" id="impSignals">Import recent Telegram signals as leads</button></div>'+
+    '<div class="seg">ALL LEADS ('+(data||[]).length+')</div>';
+  if(!data||!data.length) html+='<div class="card"><p class="muted">No leads yet — add one above or import from signals.</p></div>';
+  (data||[]).forEach(l=>{ const st=CRM_STAGES.find(s=>s.key===l.stage);
+    html+='<div class="card" data-openlead="'+l.id+'" style="cursor:pointer"><div class="row"><span style="font-weight:500">'+esc(l.full_name||('Lead #'+l.id))+'</span><span class="pill">'+esc(st?st.label:l.stage)+'</span></div>'+
+      '<div class="muted" style="font-size:12px;margin-top:4px">'+esc(l.source||'—')+' · score '+l.score+' · '+(l.owner?esc(l.owner):'unassigned')+(l.country?(' · '+esc(l.country)):'')+'</div></div>'; });
+  body.innerHTML=html;
+  $('#nlAdd').onclick=addLead; $('#impSignals').onclick=importSignals;
+  document.querySelectorAll('[data-openlead]').forEach(c=> c.onclick=()=>openLead(c.dataset.openlead));
+}
+async function addLead(){
+  const lead={ full_name:$('#nlName').value.trim(), phone:$('#nlPhone').value.trim(), email:$('#nlEmail').value.trim(),
+    country:$('#nlCountry').value.trim(), source:$('#nlSource').value||'manual', score:parseInt($('#nlScore').value)||0,
+    stage:'new', status:'new', created_by:ME.email };
+  if(!lead.full_name && !lead.phone && !lead.email){ $('#nlMsg').textContent='Enter at least a name, phone or email.'; return; }
+  const { data, error }=await sb.from('crm_leads').insert(lead).select('id').maybeSingle();
+  if(error){ $('#nlMsg').textContent='Error: '+error.message; return; }
+  if(data) await sb.from('crm_activities').insert({lead_id:data.id,type:'created',summary:'Lead created',actor:ME.email});
+  crmLeads();
+}
+async function importSignals(){
+  const { data:ev }=await sb.from('bot_intent_events').select('telegram_id,username,first_name,intent_label').order('created_at',{ascending:false}).limit(30);
+  if(!ev||!ev.length){ alert('No signals to import.'); return; }
+  const { data:existing }=await sb.from('crm_leads').select('telegram_id').not('telegram_id','is',null);
+  const have=new Set((existing||[]).map(r=>String(r.telegram_id))); const seen=new Set(); const rows=[];
+  ev.forEach(e=>{ const id=String(e.telegram_id||''); if(!id||have.has(id)||seen.has(id)) return; seen.add(id);
+    rows.push({ full_name:e.first_name||('TG '+id), telegram_id:e.telegram_id, source:'telegram', stage:'new', status:'new',
+      notes:'Imported signal: '+(e.intent_label||''), created_by:ME.email }); });
+  if(!rows.length){ alert('No new signals — they\'re already in the CRM.'); return; }
+  const { error }=await sb.from('crm_leads').insert(rows);
+  if(error){ alert(error.message); return; } crmLeads();
+}
+
+async function openLead(id){
+  $('#view').innerHTML='<p class="muted">Loading lead…</p>';
+  const { data:l, error }=await sb.from('crm_leads').select('*').eq('id',id).maybeSingle();
+  if(error||!l){ $('#view').innerHTML='<div class="card">Could not load lead.</div>'; return; }
+  const acts=await sb.from('crm_activities').select('*').eq('lead_id',id).order('at',{ascending:false}).limit(30);
+  const tasks=await sb.from('crm_tasks').select('*').eq('lead_id',id).order('created_at',{ascending:false});
+  const stageOpts=CRM_STAGES.map(s=>'<option value="'+s.key+'"'+(s.key===l.stage?' selected':'')+'>'+esc(s.label)+'</option>').join('');
+  let html='<button class="ghost" id="leadBack">← Back to CRM</button>';
+  html+='<div class="card" style="margin-top:12px"><div class="row"><input id="ldName" value="'+escA(l.full_name||'')+'" style="font-weight:500;max-width:58%"/><select id="ldStage">'+stageOpts+'</select></div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px">'+
+    '<div><div class="lab">Email</div><input id="ldEmail" value="'+escA(l.email||'')+'"/></div>'+
+    '<div><div class="lab">Phone</div><input id="ldPhone" value="'+escA(l.phone||'')+'"/></div>'+
+    '<div><div class="lab">Country</div><input id="ldCountry" value="'+escA(l.country||'')+'"/></div>'+
+    '<div><div class="lab">Owner (email)</div><input id="ldOwner" value="'+escA(l.owner||'')+'"/></div>'+
+    '<div><div class="lab">Source</div><input id="ldSource" value="'+escA(l.source||'')+'"/></div>'+
+    '<div><div class="lab">Score</div><input id="ldScore" type="number" value="'+(l.score||0)+'"/></div>'+
+    '<div style="grid-column:1/3"><div class="lab">Tags (comma-separated)</div><input id="ldTags" value="'+escA((l.tags||[]).join(', '))+'"/></div></div>'+
+    '<div class="lab">Notes</div><textarea id="ldNotes">'+esc(l.notes||'')+'</textarea>'+
+    '<div style="margin-top:8px"><button class="primary" id="ldSave">Save</button> <span id="ldMsg" class="muted" style="font-size:12px"></span></div></div>';
+  html+='<div class="seg">TASKS</div><div class="card"><div style="display:flex;gap:8px"><input id="ltTitle" placeholder="New task (e.g. Call back)"/><input id="ltDue" type="date" style="max-width:150px"/><button class="primary" id="ltAdd">Add</button></div>';
+  (tasks.data||[]).forEach(t=>{ html+='<div class="row" style="margin-top:8px"><span style="font-size:13px'+(t.status==='done'?';text-decoration:line-through;color:var(--muted)':'')+'">'+esc(t.title)+(t.due_at?(' <span class="muted" style="font-size:11px">· due '+new Date(t.due_at).toLocaleDateString()+'</span>'):'')+'</span>'+(t.status==='open'?'<button class="ghost" data-donetask="'+t.id+'">Done</button>':'<span class="pill ok">done</span>')+'</div>'; });
+  html+='</div>';
+  html+='<div class="seg">ACTIVITY</div><div class="card">';
+  if(!acts.data||!acts.data.length) html+='<p class="muted" style="font-size:12px">No activity yet.</p>';
+  (acts.data||[]).forEach(a=>{ let when=a.at; try{when=new Date(a.at).toLocaleString();}catch(e){} html+='<div style="font-size:12px;margin-bottom:7px"><span class="muted">'+esc(when)+' · '+esc(a.actor||'')+'</span><br>'+esc(a.summary||a.type||'')+'</div>'; });
+  html+='</div>';
   $('#view').innerHTML=html;
-  document.querySelectorAll('[data-csave]').forEach(b=>b.onclick=()=>saveClient(b.dataset.csave,b));
-  document.querySelectorAll('[data-addid]').forEach(b=>b.onclick=()=>addClient(b.dataset.addid,b.dataset.addn,b.dataset.addu));
+  $('#leadBack').onclick=()=>{ CRM_TAB='leads'; renderCrm(); };
+  $('#ldSave').onclick=()=>saveLead(id);
+  $('#ltAdd').onclick=()=>addLeadTask(id);
+  document.querySelectorAll('[data-donetask]').forEach(b=> b.onclick=()=>completeTask(b.dataset.donetask,()=>openLead(id)));
 }
-async function saveClient(id,btn){
-  const stage=document.querySelector('[data-cs="'+id+'"]').value;
-  const owner=document.querySelector('[data-co="'+id+'"]').value;
-  const notes=document.querySelector('[data-cn="'+id+'"]').value;
-  btn.disabled=true;
-  const { error }=await sb.from('bot_clients').update({stage,owner,notes,updated_at:new Date().toISOString()}).eq('telegram_id',id);
-  btn.disabled=false; btn.textContent= error?('Failed: '+error.message):'Saved ✓';
+async function saveLead(id){
+  const newStage=$('#ldStage').value;
+  const { data:cur }=await sb.from('crm_leads').select('stage').eq('id',id).maybeSingle();
+  const patch={ full_name:$('#ldName').value, email:$('#ldEmail').value, phone:$('#ldPhone').value, country:$('#ldCountry').value,
+    owner:$('#ldOwner').value, source:$('#ldSource').value, score:parseInt($('#ldScore').value)||0,
+    tags:$('#ldTags').value.split(',').map(s=>s.trim()).filter(Boolean), notes:$('#ldNotes').value,
+    stage:newStage, last_activity_at:new Date().toISOString() };
+  const { error }=await sb.from('crm_leads').update(patch).eq('id',id);
+  const m=$('#ldMsg'); if(error){ m.textContent='Error: '+error.message; return; }
+  if(cur && cur.stage!==newStage){ await sb.from('crm_lead_history').insert({lead_id:id,from_stage:cur.stage,to_stage:newStage,actor:ME.email});
+    await sb.from('crm_activities').insert({lead_id:id,type:'stage',summary:'Moved '+cur.stage+' → '+newStage,actor:ME.email}); }
+  m.textContent='Saved ✓';
 }
-async function addClient(id,name,username){
-  const { error }=await sb.from('bot_clients').upsert({telegram_id:id,first_name:name,username,stage:'New',updated_at:new Date().toISOString()},{onConflict:'telegram_id'});
-  if(error){ alert(error.message); return; } renderCrm();
+async function addLeadTask(id){
+  const title=$('#ltTitle').value.trim(); if(!title) return;
+  const due=$('#ltDue').value? new Date($('#ltDue').value).toISOString():null;
+  const { error }=await sb.from('crm_tasks').insert({title,due_at:due,lead_id:id,assignee:ME.email,created_by:ME.email});
+  if(error){ alert(error.message); return; }
+  await sb.from('crm_activities').insert({lead_id:id,type:'task',summary:'Task added: '+title,actor:ME.email});
+  openLead(id);
+}
+async function completeTask(id,cb){
+  await sb.from('crm_tasks').update({status:'done',completed_at:new Date().toISOString()}).eq('id',id);
+  if(cb) cb(); else crmTasks();
+}
+async function crmTasks(){
+  const body=$('#crmbody'); body.innerHTML='<p class="muted">Loading tasks…</p>';
+  const { data, error }=await sb.from('crm_tasks').select('*').eq('status','open').order('due_at',{ascending:true,nullsFirst:false});
+  if(error){ body.innerHTML='<div class="card">Error: '+esc(error.message)+'</div>'; return; }
+  let html='<p class="muted" style="margin-top:0">Open tasks, soonest due first.</p>';
+  if(!data||!data.length) html+='<div class="card"><p class="muted">No open tasks. ✓</p></div>';
+  (data||[]).forEach(t=>{ const overdue=t.due_at && new Date(t.due_at)<new Date();
+    let due=''; if(t.due_at){ try{due=new Date(t.due_at).toLocaleDateString();}catch(e){due=t.due_at;} }
+    html+='<div class="card"><div class="row"><span style="font-size:13px">'+esc(t.title)+(t.due_at?(' <span style="font-size:11px;color:'+(overdue?'var(--bad)':'var(--muted)')+'">· due '+esc(due)+(overdue?' (overdue)':'')+'</span>'):'')+'<br><span class="muted" style="font-size:11px">'+esc(t.assignee||'unassigned')+(t.lead_id?(' · lead #'+t.lead_id):'')+'</span></span>'+
+      '<span class="ctrls">'+(t.lead_id?'<button class="ghost" data-opentl="'+t.lead_id+'">Open lead</button>':'')+'<button class="primary" data-donet="'+t.id+'">Done</button></span></div></div>'; });
+  body.innerHTML=html;
+  document.querySelectorAll('[data-donet]').forEach(b=> b.onclick=()=>completeTask(b.dataset.donet,crmTasks));
+  document.querySelectorAll('[data-opentl]').forEach(b=> b.onclick=()=>openLead(b.dataset.opentl));
 }
 
 // ── Sent log (read-only) ──

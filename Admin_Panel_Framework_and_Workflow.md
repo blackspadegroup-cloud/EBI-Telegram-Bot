@@ -184,12 +184,12 @@ Separate from the live marketing site so it can never affect it. Cost: $0.
   `bot_edu_progress` (current_day = last sent, confirmed_day = last confirmed).
 - ⬜ Team fills Day 1–30 via website → Steve approves → publishes
 
-### Stage 4 — Client tracking / CRM (the team's daily workspace)
-- ✅ `bot_clients` table created (5-stage pipeline) — CRM views/wiring pending
-- ⬜ CRM view: pipeline (New → Engaged → Hot → Contacted → Converted), joining
-  subscribers + intent events + Q&A history + who replied
-- ⬜ Team enters/updates client data **manually in the panel** (single system)
-- ⬜ Editors log notes / move status live (operational, no approval gate)
+### Stage 4 — CRM (Phase 1 BUILT — see `EBI_CRM_Design.md` for full vision)
+- ✅ CRM Phase 1 tables: `crm_leads`, `crm_pipeline_stages` (11 seeded), `crm_lead_history`, `crm_tasks`, `crm_activities` (RLS-enforced)
+- ✅ Panel CRM rebuilt: **Pipeline** (11-stage drag-and-drop board), **Leads** (inbox + add + import Telegram signals), **lead profile** (fields, notes, tags, tasks, activity timeline), **Tasks** (due-sorted, complete)
+- ✅ Verified live (insert/move/activity/cascade)
+- ⬜ Phase 2 (gated on broker API): deposits/revenue, IB module, comms center, automation, support, marketing analytics — see design doc
+- ⬜ Reminder to Steve: confirm AIMS FX / MetaApi API access before Phase 2
 
 ---
 
